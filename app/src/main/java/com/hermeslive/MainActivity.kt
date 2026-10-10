@@ -288,8 +288,13 @@ class MainActivity : Activity() {
             hint = getString(R.string.settings_token_hint)
             setText(prefs().getString("token", ""))
         }
+        val bargeSwitch = Switch(this).apply {
+            text = getString(R.string.settings_barge_in)
+            isChecked = prefs().getBoolean("barge_in", true)
+        }
         layout.addView(urlInput)
         layout.addView(tokenInput)
+        layout.addView(bargeSwitch)
         val usageButton = Button(this).apply {
             setText(R.string.settings_usage_access)
             setOnClickListener {
@@ -304,6 +309,7 @@ class MainActivity : Activity() {
                 prefs().edit()
                     .putString("url", urlInput.text.toString().trim())
                     .putString("token", tokenInput.text.toString().trim())
+                    .putBoolean("barge_in", bargeSwitch.isChecked)
                     .apply()
                 loadConversations()
             }

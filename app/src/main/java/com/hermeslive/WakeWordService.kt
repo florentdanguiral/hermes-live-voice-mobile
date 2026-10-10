@@ -126,7 +126,11 @@ class WakeWordService : Service() {
         super.onCreate()
         createChannel()
         audio = AudioEngine { frame ->
-            if (audio?.playbackActive != true) session?.sendAudioFrame(frame)
+            // Half-duplex par défaut (évite l'écho haut-parleur) ; le barge-in
+            // (réglage) garde le micro actif pendant la réponse : le serveur
+            // détecte la parole, émet input.speech_started et coupe le TTS.
+            val muted = audio?.playbackActive == true && !bargeIn()
+            if (!muted) session?.sendAudioFrame(frame)
         }
     }
 
@@ -363,4 +367,5 @@ class WakeWordService : Service() {
     private fun prefs() = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private fun url() = prefs().getString("url", "") ?: ""
     private fun token() = prefs().getString("token", "") ?: ""
+    fun bargeIn(): Boolean = prefs().getBoolean("barge_in", true)
 }
