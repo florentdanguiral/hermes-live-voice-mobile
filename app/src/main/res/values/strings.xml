@@ -32,6 +32,7 @@
     <string name="notification_listening">Écoute de « Hey Hermes »</string>
     <string name="notification_session">Session vocale en cours</string>
     <string name="notification_paused">En pause — ouvre l\'app pour activer l\'écoute</string>
+    <string name="notification_tap_to_listen">Redémarré : touche ici pour réactiver « Hey Hermes »</string>
 
     <string name="settings_title">Réglages</string>
     <string name="settings_url_hint">URL WebSocket (wss://…/v1/live)</string>

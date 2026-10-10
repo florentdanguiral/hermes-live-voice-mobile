@@ -128,11 +128,25 @@ class WakeWordService : Service() {
         audio = AudioEngine { frame ->
             if (audio?.playbackActive != true) session?.sendAudioFrame(frame)
         }
-        startForegroundCompat()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForegroundCompat()
+        // Android 14+ : le service micro ne peut passer foreground que depuis
+        // le premier plan avec RECORD_AUDIO accordé (ou une exemption). Sinon
+        // startForeground lève SecurityException de façon asynchrone — on
+        // dégrade proprement (arrêt + notification) plutôt que de crasher.
+        if (!hasMicPermission()) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        try {
+            startForegroundCompat()
+        } catch (_: Exception) {
+            // Démarrage non éligible (boot, restart système en arrière-plan) :
+            // on s'arrête, l'app rouverte relancera l'écoute depuis le premier plan.
+            stopSelf()
+            return START_NOT_STICKY
+        }
         applyWakeWordState()
         updateNotification()
         return START_STICKY

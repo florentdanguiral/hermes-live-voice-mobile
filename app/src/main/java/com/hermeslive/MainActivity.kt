@@ -89,6 +89,7 @@ class MainActivity : Activity() {
         wakeSwitch.setOnCheckedChangeListener { _, checked ->
             if (checked) {
                 if (ensurePermissions()) {
+                    startService()
                     service?.setWakeEnabled(true)
                 } else {
                     wakeSwitch.isChecked = false
@@ -99,7 +100,7 @@ class MainActivity : Activity() {
             render()
         }
 
-        if (prefs().getBoolean("wake_enabled", false)) {
+        if (prefs().getBoolean("wake_enabled", false) && hasMic()) {
             startService()
         }
         if (!isConfigured()) showSettings()
@@ -127,6 +128,9 @@ class MainActivity : Activity() {
     private fun connectFromUi() {
         val pos = spinner.selectedItemPosition
         val resumeId = if (pos <= 0) null else conversations.getOrNull(pos - 1)?.id
+        // Passe le service en FGS (éligible depuis le premier plan) pour que la
+        // session survive à la fermeture de l'app.
+        startService()
         service?.connect(resumeId)
     }
 
@@ -150,7 +154,8 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode != REQ_AUDIO) return
-        if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+        // Le micro est la première permission demandée ; les notifications sont optionnelles.
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
             startService()
             service?.setWakeEnabled(wakeSwitch.isChecked)
             render()
@@ -158,6 +163,9 @@ class MainActivity : Activity() {
             Toast.makeText(this, R.string.error_no_mic, Toast.LENGTH_LONG).show()
         }
     }
+
+    private fun hasMic(): Boolean =
+        checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     // ----- Rendu -----
 
