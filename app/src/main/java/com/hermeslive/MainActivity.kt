@@ -44,6 +44,7 @@ class MainActivity : Activity() {
     private var service: WakeWordService? = null
     private var conversations: List<Conversation> = emptyList()
     private var lastRenderedLines = 0
+    private var assistConnectPending = false
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
@@ -51,6 +52,7 @@ class MainActivity : Activity() {
             service?.addListener(uiListener)
             render()
             loadConversations()
+            maybeConnectFromAssistant()
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
@@ -103,7 +105,32 @@ class MainActivity : Activity() {
         if (prefs().getBoolean("wake_enabled", false) && hasMic()) {
             startService()
         }
+        assistConnectPending = intent?.action == Intent.ACTION_ASSIST
         if (!isConfigured()) showSettings()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.action == Intent.ACTION_ASSIST) {
+            assistConnectPending = true
+            maybeConnectFromAssistant()
+        }
+    }
+
+    /** Ouverture via le geste assistant (appui long power) : connecte direct. */
+    private fun maybeConnectFromAssistant() {
+        if (!assistConnectPending) return
+        val s = service ?: return
+        if (s.sessionActive) {
+            assistConnectPending = false
+            return
+        }
+        if (hasMic()) {
+            assistConnectPending = false
+            connectFromUi()
+        } else {
+            ensurePermissions()
+        }
     }
 
     override fun onStart() {
@@ -158,6 +185,7 @@ class MainActivity : Activity() {
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
             startService()
             service?.setWakeEnabled(wakeSwitch.isChecked)
+            maybeConnectFromAssistant()
             render()
         } else {
             Toast.makeText(this, R.string.error_no_mic, Toast.LENGTH_LONG).show()

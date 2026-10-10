@@ -42,6 +42,17 @@ La CI GitHub Actions (`.github/workflows/android.yml`) déchiffre le keystore
 main. Le keystore en clair et ses mots de passe ne sont jamais commités : seuls
 les fichiers `.age` chiffrés sont dans le repo.
 
+## Assistant par défaut (toujours actif sans ouvrir l'app)
+
+GrapheneOS/Android permettent de définir Hermes Live comme **assistant numérique
+par défaut** (Paramètres → Apps → Apps par défaut → Application d'assistance
+numérique). Une fois ce rôle accordé :
+
+- le démarrage du service micro en arrière-plan est exempté des restrictions
+  Android 14 — l'écoute « Hey Hermes » redémarre **seule après un reboot** ;
+- le geste système (appui long sur power, configurable) ouvre l'app et connecte
+  la session vocale immédiatement.
+
 ## Sécurité / vie privée
 
 - TLS de bout en bout (wss), jeton en query param sur l'upgrade WebSocket

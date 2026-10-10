@@ -28,6 +28,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Rôle « assistant numérique » : permet de définir Hermes Live comme
+                 assistant par défaut (exemption FGS micro en background + geste
+                 système appui long power qui ouvre l'app en écoute). -->
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
         <service
