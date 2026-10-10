@@ -46,12 +46,26 @@ jobs:
           name: release-apk
           path: app/build/outputs/apk/release/*.apk
 
-      - name: Publish to the moving "latest" prerelease
+      - name: Publish a versioned prerelease (Obtainium-friendly)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
-          gh release view latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create latest --repo "$GITHUB_REPOSITORY" --prerelease --title "Build latest" \
-                 --notes "APK de la branche main, mis à jour à chaque push."
-          gh release upload latest "$APK" --repo "$GITHUB_REPOSITORY" --clobber
+          VERSION=$(grep -m1 'versionName' app/build.gradle | sed 's/.*"\(.*\)".*/\1/')
+          APK=app/build/outputs/apk/release/app-release.apk
+          OUT="hermes-live-$VERSION.apk"
+          cp "$APK" "$OUT"
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" "$OUT" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "v$VERSION" "$OUT" --repo "$GITHUB_REPOSITORY" \
+              --prerelease --title "v$VERSION" \
+              --notes "APK signé de la branche main. Installe par-dessus la version précédente."
+          fi
+          # Ne garde que les 4 releases versionnées les plus récentes.
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 50 \
+            --json tagName,publishedAt \
+            -q 'sort_by(.publishedAt) | reverse | .[].tagName' |
+            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | tail -n +5 |
+            while read -r t; do
+              gh release delete "$t" --yes --cleanup-tag --repo "$GITHUB_REPOSITORY"
+            done
