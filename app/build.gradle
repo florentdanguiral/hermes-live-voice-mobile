@@ -1,0 +1,69 @@
+apply plugin: 'com.android.application'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+// Signature release : charge keystore/keystore.properties (gitignoré).
+// Le clair vit dans les fichiers .age du repo, déchiffrés avec la clé age
+// (secret GitHub KEYSTORE_AGE_KEY) — jamais de secret en clair ici.
+def keystoreProps = new Properties()
+def keystorePropFile = new File(rootProject.projectDir, "keystore/keystore.properties")
+if (keystorePropFile.exists()) {
+    keystoreProps.load(new FileInputStream(keystorePropFile))
+} else {
+    throw new GradleException(
+        "keystore/keystore.properties absent : dechiffre keystore/*.age avec la cle age (voir README)")
+}
+
+android {
+    namespace 'com.hermeslive'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.hermeslive"
+        minSdkVersion 29
+        targetSdkVersion 34
+        versionCode 1
+        versionName "0.1.0"
+    }
+
+    signingConfigs {
+        release {
+            storeFile new File(rootProject.projectDir, keystoreProps.getProperty("storeFile", "keystore/hermes-live.keystore"))
+            storePassword keystoreProps.getProperty("storePassword")
+            keyAlias keystoreProps.getProperty("keyAlias", "hermes-live")
+            keyPassword keystoreProps.getProperty("keyPassword")
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+        debug {
+            signingConfig signingConfigs.release
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.2.21'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'net.java.dev.jna:jna:5.13.0@aar'
+    implementation 'com.alphacephei:vosk-android:0.3.47'
+    implementation 'org.slf4j:slf4j-android:1.7.36'
+}
