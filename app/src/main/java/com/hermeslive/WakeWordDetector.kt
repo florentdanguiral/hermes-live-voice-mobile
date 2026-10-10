@@ -7,9 +7,6 @@ import android.media.MediaRecorder
 import org.json.JSONObject
 import org.vosk.Model
 import org.vosk.Recognizer
-import java.io.File
-import java.io.FileOutputStream
-import java.util.zip.ZipInputStream
 
 /**
  * Wake word « hey hermes » via Vosk (modèle small-fr 16 kHz embarqué, grammaire
@@ -41,7 +38,7 @@ class WakeWordDetector(private val context: Context, private val onDetected: () 
         running = true
         thread = Thread({
             try {
-                val m = model ?: loadModel(context).also { model = it }
+                val m = model ?: ModelStore.get(context).also { model = it }
                 val recognizer = Recognizer(m, VOSK_SAMPLE_RATE, GRAMMAR)
                 val minBuf = AudioRecord.getMinBufferSize(
                     MIC_SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
@@ -142,37 +139,4 @@ class WakeWordDetector(private val context: Context, private val onDetected: () 
         thread = null
     }
 
-    /** Extrait le modèle zippé des assets vers filesDir, une seule fois. */
-    private fun loadModel(context: Context): Model {
-        val dir = File(context.filesDir, "vosk-model")
-        val marker = File(dir, "README")
-        if (!marker.exists()) {
-            dir.deleteRecursively()
-            dir.parentFile?.mkdirs()
-            context.assets.open("vosk-model-small-fr-0.22.zip").use { input ->
-                ZipInputStream(input).use { zip ->
-                    var entry = zip.nextEntry
-                    val tmp = File(context.filesDir, "vosk-extract")
-                    tmp.deleteRecursively()
-                    tmp.mkdirs()
-                    while (entry != null) {
-                        val out = File(tmp, entry.name)
-                        if (entry.isDirectory) {
-                            out.mkdirs()
-                        } else {
-                            out.parentFile?.mkdirs()
-                            FileOutputStream(out).use { zip.copyTo(it) }
-                        }
-                        zip.closeEntry()
-                        entry = zip.nextEntry
-                    }
-                    // L'archive contient un dossier racine vosk-model-small-fr-0.22
-                    val extracted = File(tmp, "vosk-model-small-fr-0.22")
-                    if (extracted.exists()) extracted.renameTo(dir) else tmp.renameTo(dir)
-                    tmp.deleteRecursively()
-                }
-            }
-        }
-        return Model(dir.absolutePath)
-    }
 }

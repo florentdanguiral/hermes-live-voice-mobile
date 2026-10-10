@@ -148,6 +148,15 @@ class LiveSession(
         socket?.send(payload.toString())
     }
 
+    /** Barge-in : demande à la gateway d'annuler la réponse en cours (TTS compris). */
+    fun sendCancel() {
+        if (!ready) return
+        val payload = JSONObject()
+            .put("type", "response.cancel")
+            .put("id", "c-${requestIds.getAndIncrement()}")
+        socket?.send(payload.toString())
+    }
+
     fun close() {
         userClosed = true
         ready = false

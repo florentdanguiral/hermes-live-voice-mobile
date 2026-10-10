@@ -51,6 +51,7 @@ class WakeWordService : Service() {
     private var session: LiveSession? = null
     private var audio: AudioEngine? = null
     private var wake: WakeWordDetector? = null
+    private var hangup: HangupDetector? = null
     private var outputSampleRate = AudioEngine.OUTPUT_SAMPLE_RATE
     private var resumeSessionId: String? = null
 
@@ -71,6 +72,7 @@ class WakeWordService : Service() {
                 sessionActive = true
                 setStatus(getString(R.string.status_ready, model))
                 audio?.startMic()
+                hangup?.start()
                 updateNotification()
             }
         }
@@ -85,7 +87,13 @@ class WakeWordService : Service() {
         }
 
         override fun onSpeechStarted() {
-            mainHandler.post { audio?.stopPlayback() }
+            mainHandler.post {
+                // Barge-in confirmé par le serveur : on coupe la lecture locale
+                // ET on annule la réponse côté serveur (sinon Marie finit de
+                // synthétiser dans le vide avant de traiter le nouveau tour).
+                session?.sendCancel()
+                audio?.stopPlayback()
+            }
         }
 
         override fun onResponseStarted() {
@@ -131,6 +139,16 @@ class WakeWordService : Service() {
             // détecte la parole, émet input.speech_started et coupe le TTS.
             val muted = audio?.playbackActive == true && !bargeIn()
             if (!muted) session?.sendAudioFrame(frame)
+        }
+        // Raccroché vocal : les trames brutes de la session alimentent aussi
+        // un recognizer Vosk (« raccroche », « au revoir hermes », « merci hermes »).
+        hangup = HangupDetector(this) {
+            mainHandler.post { disconnect() }
+        }
+        audio?.rawSink = { chunk, len ->
+            // Pas pendant la lecture (écho haut-parleur) : après un barge-in la
+            // lecture s'arrête et la phrase de fin est entendue clairement.
+            if (audio?.playbackActive != true) hangup?.feed(chunk, len)
         }
     }
 
@@ -202,6 +220,7 @@ class WakeWordService : Service() {
     }
 
     fun disconnect() {
+        hangup?.stop()
         session?.close()
         session = null
         sessionActive = false
@@ -271,6 +290,7 @@ class WakeWordService : Service() {
     }
 
     private fun onDisconnected(status: String) {
+        hangup?.stop()
         audio?.stopEverything()
         session = null
         sessionActive = false

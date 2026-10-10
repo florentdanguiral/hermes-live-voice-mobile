@@ -15,6 +15,9 @@ import android.media.MediaRecorder
  */
 class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
 
+    /** Second consommateur optionnel des trames brutes 48 kHz (raccroché vocal). */
+    @Volatile var rawSink: ((ByteArray, Int) -> Unit)? = null
+
     companion object {
         const val MIC_SAMPLE_RATE = 48000
         const val OUTPUT_SAMPLE_RATE = 24000
@@ -58,6 +61,7 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
             while (micRunning) {
                 val n = rec.read(mic, 0, mic.size)
                 if (n <= 0) continue
+                rawSink?.invoke(mic, n)
                 // Décimation x2 (48 kHz -> 24 kHz) : un échantillon sur deux.
                 var src = 0
                 while (src + 4 <= n && filled + 2 <= out.size) {
