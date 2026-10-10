@@ -26,6 +26,7 @@
     <string name="context_app">Contexte : %1$s</string>
     <string name="context_none">Contexte : écran d\'accueil</string>
     <string name="context_no_access">Contexte : autorisez l\'accès aux usages dans les réglages</string>
+    <string name="context_mic">Micro : %1$d</string>
 
     <string name="notification_channel">Assistant vocal</string>
     <string name="notification_channel_desc">Écoute permanente de « Hey Hermes » et sessions vocales</string>

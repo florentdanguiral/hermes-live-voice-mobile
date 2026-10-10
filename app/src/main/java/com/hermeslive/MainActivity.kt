@@ -209,10 +209,15 @@ class MainActivity : Activity() {
         connectButton.setText(if (s.sessionActive) R.string.disconnect else R.string.connect)
 
         val foreground = s.currentForegroundApp()
-        contextView.text = if (hasUsageAccess()) {
-            foreground?.let { getString(R.string.context_app, appName(it)) } ?: getString(R.string.context_none)
+        val micLevel = if (!s.sessionActive && s.isWakeEnabled() && s.lastMicRms > 0.0) {
+            " | " + getString(R.string.context_mic, s.lastMicRms.toInt())
         } else {
-            getString(R.string.context_no_access)
+            ""
+        }
+        contextView.text = if (hasUsageAccess()) {
+            (foreground?.let { getString(R.string.context_app, appName(it)) } ?: getString(R.string.context_none)) + micLevel
+        } else {
+            getString(R.string.context_no_access) + micLevel
         }
 
         // Transcript incrémental

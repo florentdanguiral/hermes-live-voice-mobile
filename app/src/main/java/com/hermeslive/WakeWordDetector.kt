@@ -14,17 +14,20 @@ import org.vosk.Recognizer
  * capture en 48 kHz, on décime par 3) et le match apparaît dans les résultats
  * PARTIELS (« hey » -> « hermes »), rarement en final.
  *
- * Gate RMS : en silence, Vosk ne reçoit rien (batterie) et l'état partiel est
- * purgé pour éviter les faux matchs résiduels.
+ * Gate adaptatif : le seuil suit le bruit de fond du téléphone (un seuil fixe
+ * calibré ailleurs peut être trop haut — silence total du détecteur).
  */
-class WakeWordDetector(private val context: Context, private val onDetected: () -> Unit) {
+class WakeWordDetector(
+    private val context: Context,
+    private val onDetected: () -> Unit,
+    private val onLevel: (Double) -> Unit = {},
+) {
 
     companion object {
         private const val MIC_SAMPLE_RATE = 48000
         private const val VOSK_SAMPLE_RATE = 16000f
         private const val GRAMMAR = """["hey hermes", "hermes", "[unk]"]"""
         private const val CHUNK = 2048 // octets PCM16 @ 48 kHz
-        private const val SPEECH_RMS_THRESHOLD = 600.0 // seuil d'entrée Vosk
     }
 
     private var model: Model? = null
@@ -56,11 +59,14 @@ class WakeWordDetector(private val context: Context, private val onDetected: () 
                 }
                 rec.startRecording()
                 val buf = ByteArray(CHUNK)
+                val gate = PcmGate()
                 var wasSilent = false
                 while (running) {
                     val n = rec.read(buf, 0, buf.size)
                     if (n <= 0) continue
-                    if (rms16(buf, n) < SPEECH_RMS_THRESHOLD) {
+                    val rms = rms16(buf, n)
+                    onLevel(rms)
+                    if (!gate.open(rms, System.currentTimeMillis())) {
                         if (!wasSilent) {
                             recognizer.reset()
                             wasSilent = true

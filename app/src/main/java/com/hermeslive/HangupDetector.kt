@@ -15,10 +15,11 @@ class HangupDetector(private val context: Context, private val onDetected: () ->
         private const val VOSK_SAMPLE_RATE = 16000f
         private const val GRAMMAR =
             """["raccroche", "raccrocher", "au revoir hermes", "merci hermes", "stop hermes"]"""
-        private const val SPEECH_RMS_THRESHOLD = 600.0
     }
 
     private var recognizer: Recognizer? = null
+    private var gate = PcmGate()
+    private var wasSilent = false
     @Volatile var running = false
         private set
 
@@ -26,6 +27,7 @@ class HangupDetector(private val context: Context, private val onDetected: () ->
         if (running) return
         try {
             recognizer = Recognizer(ModelStore.get(context), VOSK_SAMPLE_RATE, GRAMMAR)
+            gate = PcmGate()
             running = true
         } catch (_: Throwable) {
             recognizer = null
@@ -42,11 +44,15 @@ class HangupDetector(private val context: Context, private val onDetected: () ->
     fun feed(pcm48: ByteArray, len: Int) {
         if (!running) return
         val rec = recognizer ?: return
-        if (rms16(pcm48, len) < SPEECH_RMS_THRESHOLD) {
-            // Retour au silence : purge l'état partiel pour éviter les matchs résiduels.
-            rec.reset()
+        val rms = rms16(pcm48, len)
+        if (!gate.open(rms, System.currentTimeMillis())) {
+            if (!wasSilent) {
+                rec.reset()
+                wasSilent = true
+            }
             return
         }
+        wasSilent = false
         // Décimation 48 kHz -> 16 kHz (un échantillon sur trois).
         val out = ByteArray((len / 6) * 2)
         var o = 0

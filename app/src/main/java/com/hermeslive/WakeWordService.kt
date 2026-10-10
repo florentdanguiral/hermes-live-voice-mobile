@@ -65,6 +65,10 @@ class WakeWordService : Service() {
     var sessionActive: Boolean = false
         private set
 
+    /** Niveau RMS courant du micro (diagnostic wake word), mis à jour par le détecteur. */
+    @Volatile var lastMicRms: Double = 0.0
+    private var lastLevelUiPush = 0L
+
     private val sessionListener = object : LiveSession.Listener {
         override fun onReady(sessionId: String, model: String, sampleRate: Int, conversationId: String?) {
             mainHandler.post {
@@ -274,9 +278,18 @@ class WakeWordService : Service() {
         val enabled = isWakeEnabled()
         if (enabled && session == null && hasMicPermission()) {
             if (wake == null) {
-                wake = WakeWordDetector(this) {
-                    mainHandler.post { connect(resumeSessionId) }
-                }
+                wake = WakeWordDetector(
+                    this,
+                    onDetected = { mainHandler.post { connect(resumeSessionId) } },
+                    onLevel = { rms ->
+                        lastMicRms = rms
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        if (now - lastLevelUiPush > 400) {
+                            lastLevelUiPush = now
+                            mainHandler.post { notifyUi() }
+                        }
+                    },
+                )
             }
             wake?.start()
             if (session == null) setStatus(getString(R.string.status_wake))
