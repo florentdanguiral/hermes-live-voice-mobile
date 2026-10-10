@@ -3,9 +3,14 @@ package com.hermeslive
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.IBinder
+import android.provider.Settings
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
@@ -17,22 +22,18 @@ import android.widget.TextView
 import android.widget.Toast
 
 /**
- * Assistant vocal Hermes Live : streame le micro vers la gateway Hermes Live
- * Voice (URL + jeton configurés dans l'app), joue le TTS reçu, gère la liste
- * des conversations et le wake word « hey hermes ».
- *
- * Tour de parole : côté serveur (VAD + gate de complétude). Pendant que la
- * réponse est lue, l'envoi du micro est suspendu (half-duplex) pour éviter
- * que le haut-parleur se réécoute ; à la fin de la lecture le micro repart.
+ * UI de l'assistant : binding au WakeWordService (session + micro + wake word
+ * vivent dans le service, l'app n'a pas besoin de rester ouverte). Affiche
+ * l'état, la transcription, l'app au premier plan (contexte) et les réglages.
  */
 class MainActivity : Activity() {
 
     companion object {
-        private const val PREFS = "hermes_live"
         private const val REQ_AUDIO = 41
     }
 
     private lateinit var statusView: TextView
+    private lateinit var contextView: TextView
     private lateinit var transcriptView: TextView
     private lateinit var transcriptScroller: ScrollView
     private lateinit var connectButton: Button
@@ -40,21 +41,37 @@ class MainActivity : Activity() {
     private lateinit var spinner: Spinner
     private lateinit var settingsButton: Button
 
-    private var session: LiveSession? = null
-    private var audio: AudioEngine? = null
-    private var wake: WakeWordDetector? = null
+    private var service: WakeWordService? = null
     private var conversations: List<Conversation> = emptyList()
-    private var outputSampleRate = AudioEngine.OUTPUT_SAMPLE_RATE
+    private var lastRenderedLines = 0
 
-    // Transcription en cours par orateur
-    private var pendingSpeaker: String? = null
-    private var pendingText = StringBuilder()
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, binder: IBinder) {
+            service = (binder as WakeWordService.LocalBinder).service
+            service?.addListener(uiListener)
+            render()
+            loadConversations()
+        }
+
+        override fun onServiceDisconnected(name: ComponentName) {
+            service?.removeListener(uiListener)
+            service = null
+            render()
+        }
+    }
+
+    private val uiListener = object : WakeWordService.UiListener {
+        override fun onUiStateChanged() {
+            runOnUiThread { render() }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         statusView = findViewById(R.id.status)
+        contextView = findViewById(R.id.context)
         transcriptView = findViewById(R.id.transcript)
         transcriptScroller = findViewById(R.id.transcript_scroller)
         connectButton = findViewById(R.id.connect_button)
@@ -62,180 +79,117 @@ class MainActivity : Activity() {
         spinner = findViewById(R.id.conversations)
         settingsButton = findViewById(R.id.settings_button)
 
-        audio = AudioEngine { frame ->
-            // Half-duplex : pas d'envoi pendant la lecture du TTS.
-            if (audio?.playbackActive != true) session?.sendAudioFrame(frame)
+        connectButton.setOnClickListener {
+            val s = service ?: return@setOnClickListener
+            if (s.sessionActive) s.disconnect() else {
+                if (ensurePermissions()) connectFromUi()
+            }
         }
-
-        connectButton.setOnClickListener { toggleConnection() }
         settingsButton.setOnClickListener { showSettings() }
         wakeSwitch.setOnCheckedChangeListener { _, checked ->
-            prefs().edit().putBoolean("wake_enabled", checked).apply()
-            applyWakeWordState()
+            if (checked) {
+                if (ensurePermissions()) {
+                    service?.setWakeEnabled(true)
+                } else {
+                    wakeSwitch.isChecked = false
+                }
+            } else {
+                service?.setWakeEnabled(false)
+            }
+            render()
         }
-        wakeSwitch.isChecked = prefs().getBoolean("wake_enabled", false)
 
-        loadConversations()
-        setStatus(getString(R.string.status_disconnected))
-        applyWakeWordState()
-        if (url().isBlank() || token().isBlank()) showSettings()
+        if (prefs().getBoolean("wake_enabled", false)) {
+            startService()
+        }
+        if (!isConfigured()) showSettings()
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        disconnect()
-        wake?.stop()
+    override fun onStart() {
+        super.onStart()
+        bindService(Intent(this, WakeWordService::class.java), connection, Context.BIND_AUTO_CREATE)
     }
 
-    // ----- Connexion -----
+    override fun onStop() {
+        super.onStop()
+        service?.removeListener(uiListener)
+        unbindService(connection)
+    }
 
-    private fun toggleConnection() {
-        if (session?.isReady == true || session != null) {
-            disconnect()
-        } else {
-            connect()
+    private fun startService() {
+        try {
+            WakeWordService.start(this)
+        } catch (_: Exception) {
+            // Certaines restrictions (démarrage background type micro) : l'app ouverte suffit.
         }
     }
 
-    private fun connect() {
+    private fun connectFromUi() {
+        val pos = spinner.selectedItemPosition
+        val resumeId = if (pos <= 0) null else conversations.getOrNull(pos - 1)?.id
+        service?.connect(resumeId)
+    }
+
+    // ----- Permissions -----
+
+    private fun ensurePermissions(): Boolean {
+        val needed = mutableListOf<String>()
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQ_AUDIO)
-            return
+            needed.add(Manifest.permission.RECORD_AUDIO)
         }
-        val url = url()
-        val token = token()
-        if (url.isBlank() || token.isBlank()) {
-            Toast.makeText(this, R.string.error_not_configured, Toast.LENGTH_LONG).show()
-            showSettings()
-            return
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            needed.add(Manifest.permission.POST_NOTIFICATIONS)
         }
-        val wsUrl = if (url.contains("?")) url else "$url?token=$token"
-        val resumeId = selectedConversationId()
-
-        // Le wake word ne doit pas tenir le micro pendant la session.
-        wake?.stop()
-        audio?.stopPlayback()
-
-        val s = LiveSession(wsUrl, sessionListener)
-        session = s
-        pendingSpeaker = null
-        pendingText = StringBuilder()
-        setStatus(getString(R.string.status_connecting))
-        connectButton.isEnabled = false
-        s.connect(resumeId)
+        if (needed.isEmpty()) return true
+        requestPermissions(needed.toTypedArray(), REQ_AUDIO)
+        return false
     }
 
-    private val sessionListener = object : LiveSession.Listener {
-        override fun onReady(sessionId: String, model: String, sampleRate: Int, conversationId: String?) {
-            runOnUiThread {
-                outputSampleRate = sampleRate
-                setStatus(getString(R.string.status_ready, model))
-                connectButton.isEnabled = true
-                connectButton.setText(R.string.disconnect)
-                audio?.startMic()
-            }
-        }
-
-        override fun onTranscript(speaker: String, text: String, final: Boolean) {
-            runOnUiThread { appendTranscript(speaker, text, final) }
-        }
-
-        override fun onAudio(pcm: ByteArray, mimeType: String) {
-            // Les callbacks WS arrivent sur le thread OkHttp ; AudioTrack est thread-safe.
-            startPlaybackIfNeeded()
-            audio?.writePcm(pcm)
-        }
-
-        override fun onSpeechStarted() {
-            runOnUiThread { audio?.stopPlayback() }
-        }
-
-        override fun onResponseStarted() {
-            runOnUiThread {
-                startPlaybackIfNeeded()
-                setStatus(getString(R.string.status_thinking))
-            }
-        }
-
-        override fun onResponseCompleted() {
-            runOnUiThread {
-                audio?.awaitDrainThenStop()
-                setStatus(getString(R.string.status_listening))
-            }
-        }
-
-        override fun onSessionError(message: String, recoverable: Boolean) {
-            runOnUiThread {
-                appendLine(getString(R.string.error_prefix, message))
-                setStatus(getString(R.string.status_error, message))
-            }
-        }
-
-        override fun onClosed() {
-            runOnUiThread { onDisconnected(getString(R.string.status_disconnected)) }
-        }
-
-        override fun onConnectionFailed(reason: String) {
-            runOnUiThread {
-                appendLine(getString(R.string.error_prefix, reason))
-                onDisconnected(getString(R.string.status_error, reason))
-            }
-        }
-    }
-
-    private fun startPlaybackIfNeeded() {
-        if (audio?.playbackActive != true) {
-            audio?.startPlayback(outputSampleRate)
-        }
-    }
-
-    private fun onDisconnected(status: String) {
-        audio?.stopEverything()
-        session = null
-        setStatus(status)
-        connectButton.isEnabled = true
-        connectButton.setText(R.string.connect)
-        applyWakeWordState()
-    }
-
-    private fun disconnect() {
-        session?.close()
-        session = null
-        audio?.stopEverything()
-        setStatus(getString(R.string.status_disconnected))
-        connectButton.isEnabled = true
-        connectButton.setText(R.string.connect)
-    }
-
-    // ----- Transcription -----
-
-    private fun appendTranscript(speaker: String, text: String, final: Boolean) {
-        if (speaker != "assistant" && speaker != "user") return
-        if (pendingSpeaker != null && pendingSpeaker != speaker) {
-            commitPending()
-        }
-        pendingSpeaker = speaker
-        pendingText.append(text)
-        if (final) commitPending()
-    }
-
-    private fun commitPending() {
-        val speaker = pendingSpeaker ?: return
-        val text = pendingText.toString().trim()
-        pendingSpeaker = null
-        pendingText = StringBuilder()
-        if (text.isEmpty()) return
-        val line = if (speaker == "user") {
-            getString(R.string.transcript_user, text)
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQ_AUDIO) return
+        if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+            startService()
+            service?.setWakeEnabled(wakeSwitch.isChecked)
+            render()
         } else {
-            getString(R.string.transcript_assistant, text)
+            Toast.makeText(this, R.string.error_no_mic, Toast.LENGTH_LONG).show()
         }
-        appendLine(line)
     }
 
-    private fun appendLine(line: String) {
-        transcriptView.append(line)
-        transcriptView.append("\n\n")
+    // ----- Rendu -----
+
+    private fun render() {
+        val s = service
+        if (s == null) {
+            statusView.setText(R.string.status_service_starting)
+            return
+        }
+        statusView.text = s.statusText.ifEmpty { getString(R.string.status_disconnected) }
+        wakeSwitch.isChecked = s.isWakeEnabled()
+        connectButton.isEnabled = true
+        connectButton.setText(if (s.sessionActive) R.string.disconnect else R.string.connect)
+
+        val foreground = s.currentForegroundApp()
+        contextView.text = if (hasUsageAccess()) {
+            foreground?.let { getString(R.string.context_app, appName(it)) } ?: getString(R.string.context_none)
+        } else {
+            getString(R.string.context_no_access)
+        }
+
+        // Transcript incrémental
+        val lines = s.transcriptLines
+        while (lastRenderedLines < lines.size) {
+            transcriptView.append(lines[lastRenderedLines])
+            transcriptView.append("\n\n")
+            lastRenderedLines++
+        }
+        if (lines.isEmpty()) {
+            transcriptView.setText(R.string.transcript_empty)
+            lastRenderedLines = 0
+        }
         transcriptScroller.post { transcriptScroller.fullScroll(ScrollView.FOCUS_DOWN) }
     }
 
@@ -243,7 +197,10 @@ class MainActivity : Activity() {
 
     private fun loadConversations() {
         Thread {
-            val api = ConversationsApi(baseHttpUrl(), token())
+            val url = prefs().getString("url", "") ?: ""
+            val token = prefs().getString("token", "") ?: ""
+            if (url.isBlank() || token.isBlank()) return@Thread
+            val api = ConversationsApi(baseHttpUrl(url), token)
             val list = api.list() ?: emptyList()
             runOnUiThread {
                 conversations = list
@@ -257,37 +214,28 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    private fun selectedConversationId(): String? {
-        val pos = spinner.selectedItemPosition
-        return if (pos <= 0) null else conversations.getOrNull(pos - 1)?.id
-    }
+    // ----- Contexte (usage stats) -----
 
-    // ----- Wake word -----
-
-    private fun applyWakeWordState() {
-        val enabled = wakeSwitch.isChecked
-        if (enabled && session == null && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            if (wake == null) wake = WakeWordDetector(this) {
-                runOnUiThread { connect() }
-            }
-            wake?.start()
-            if (session == null) setStatus(getString(R.string.status_wake))
-        } else if (!enabled) {
-            wake?.stop()
-            if (session == null) setStatus(getString(R.string.status_disconnected))
+    private fun hasUsageAccess(): Boolean {
+        try {
+            val manager = getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+            val mode = manager.checkOpNoThrow(
+                android.app.AppOpsManager.OPSTR_GET_USAGE_STATS,
+                android.os.Process.myUid(),
+                packageName,
+            )
+            return mode == android.app.AppOpsManager.MODE_ALLOWED
+        } catch (_: Exception) {
+            return false
         }
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQ_AUDIO) {
-            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-                connect()
-            } else {
-                Toast.makeText(this, R.string.error_no_mic, Toast.LENGTH_LONG).show()
-            }
+    private fun appName(packageName: String): String =
+        try {
+            packageManager.getApplicationLabel(packageManager.getApplicationInfo(packageName, 0)).toString()
+        } catch (_: Exception) {
+            packageName
         }
-    }
 
     // ----- Réglages -----
 
@@ -306,6 +254,13 @@ class MainActivity : Activity() {
         }
         layout.addView(urlInput)
         layout.addView(tokenInput)
+        val usageButton = Button(this).apply {
+            setText(R.string.settings_usage_access)
+            setOnClickListener {
+                startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+            }
+        }
+        layout.addView(usageButton)
         AlertDialog.Builder(this)
             .setTitle(R.string.settings_title)
             .setView(layout)
@@ -322,21 +277,16 @@ class MainActivity : Activity() {
 
     // ----- Utilitaires -----
 
-    private fun prefs() = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    private fun url() = prefs().getString("url", "") ?: ""
-    private fun token() = prefs().getString("token", "") ?: ""
+    private fun prefs() = getSharedPreferences(WakeWordService.PREFS, Context.MODE_PRIVATE)
+    private fun isConfigured(): Boolean =
+        !(prefs().getString("url", "") ?: "").isBlank() && !(prefs().getString("token", "") ?: "").isBlank()
 
     /** wss://hôte/v1/live -> https://hôte */
-    private fun baseHttpUrl(): String {
-        val u = url()
+    private fun baseHttpUrl(url: String): String {
         return when {
-            u.startsWith("wss://") -> "https://" + u.removePrefix("wss://")
-            u.startsWith("ws://") -> "http://" + u.removePrefix("ws://")
-            else -> u
+            url.startsWith("wss://") -> "https://" + url.removePrefix("wss://")
+            url.startsWith("ws://") -> "http://" + url.removePrefix("ws://")
+            else -> url
         }.substringBefore("/v1/").substringBefore("?").trimEnd('/')
-    }
-
-    private fun setStatus(text: String) {
-        statusView.text = text
     }
 }

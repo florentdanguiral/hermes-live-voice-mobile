@@ -4,7 +4,7 @@
     <string name="connect">Parler</string>
     <string name="disconnect">Raccrocher</string>
     <string name="settings_button">Réglages</string>
-    <string name="wake_switch">« Hey Hermes »</string>
+    <string name="wake_switch">« Hey Hermes » toujours actif</string>
     <string name="new_conversation">Nouvelle conversation</string>
 
     <string name="status_disconnected">Déconnecté</string>
@@ -14,14 +14,27 @@
     <string name="status_listening">À l\'écoute — parlez</string>
     <string name="status_wake">À l\'écoute de « Hey Hermes »</string>
     <string name="status_error">Erreur : %1$s</string>
+    <string name="status_service_starting">Démarrage du service…</string>
 
     <string name="transcript_user">Vous : %1$s</string>
     <string name="transcript_assistant">Hermes : %1$s</string>
+    <string name="transcript_empty">Aucune conversation pour l\'instant. Dis « Hey Hermes » ou appuie sur Parler.</string>
     <string name="error_prefix">— %1$s</string>
     <string name="error_not_configured">Renseignez l\'URL et le jeton dans les réglages.</string>
     <string name="error_no_mic">Permission micro refusée.</string>
 
+    <string name="context_app">Contexte : %1$s</string>
+    <string name="context_none">Contexte : écran d\'accueil</string>
+    <string name="context_no_access">Contexte : autorisez l\'accès aux usages dans les réglages</string>
+
+    <string name="notification_channel">Assistant vocal</string>
+    <string name="notification_channel_desc">Écoute permanente de « Hey Hermes » et sessions vocales</string>
+    <string name="notification_listening">Écoute de « Hey Hermes »</string>
+    <string name="notification_session">Session vocale en cours</string>
+    <string name="notification_paused">En pause — ouvre l\'app pour activer l\'écoute</string>
+
     <string name="settings_title">Réglages</string>
     <string name="settings_url_hint">URL WebSocket (wss://…/v1/live)</string>
     <string name="settings_token_hint">Jeton d\'accès</string>
+    <string name="settings_usage_access">Autoriser l\'accès aux usages (contexte app)</string>
 </resources>

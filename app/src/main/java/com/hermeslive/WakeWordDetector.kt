@@ -13,8 +13,8 @@ import java.util.zip.ZipInputStream
 
 /**
  * Wake word « hey hermes » via Vosk (modèle small-fr embarqué, grammaire restreinte).
- * Écoute le micro à 48 kHz tant que le détecteur est actif ; déclenche le callback
- * au premier match, puis se met en veille jusqu'à stop()/start().
+ * Gate RMS : Vosk ne reçoit l'audio que quand l'énergie dépasse le seuil —
+ * en silence, la détection ne consomme quasi rien (batterie).
  */
 class WakeWordDetector(private val context: Context, private val onDetected: () -> Unit) {
 
@@ -22,6 +22,7 @@ class WakeWordDetector(private val context: Context, private val onDetected: () 
         private const val SAMPLE_RATE = 48000
         private const val GRAMMAR = """["hey hermes", "hermes", "[unk]"]"""
         private const val CHUNK = 2048 // octets, 16 bits mono
+        private const val SPEECH_RMS_THRESHOLD = 900.0 // ~ -31 dBFS, seuil d'entrée Vosk
     }
 
     private var model: Model? = null
@@ -51,9 +52,19 @@ class WakeWordDetector(private val context: Context, private val onDetected: () 
                 }
                 rec.startRecording()
                 val buf = ByteArray(CHUNK)
+                var wasSilent = false
                 while (running) {
                     val n = rec.read(buf, 0, buf.size)
                     if (n <= 0) continue
+                    if (rms16(buf, n) < SPEECH_RMS_THRESHOLD) {
+                        // Retour au silence : on purge l'état partiel du recognizer.
+                        if (!wasSilent) {
+                            recognizer.reset()
+                            wasSilent = true
+                        }
+                        continue
+                    }
+                    wasSilent = false
                     if (recognizer.acceptWaveForm(buf, n)) {
                         val text = JSONObject(recognizer.result).optString("text", "")
                         if (matches(text)) {
@@ -81,6 +92,19 @@ class WakeWordDetector(private val context: Context, private val onDetected: () 
     private fun matches(text: String): Boolean {
         val normalized = text.lowercase().replace(Regex("[èéê]"), "e")
         return normalized.contains("herm")
+    }
+
+    /** RMS d'un buffer PCM16 little-endian. */
+    private fun rms16(buf: ByteArray, len: Int): Double {
+        var sum = 0.0
+        var i = 0
+        val samples = len / 2
+        while (i + 1 < len) {
+            val s = ((buf[i + 1].toInt() shl 8) or buf[i].toInt()).toShort().toDouble()
+            sum += s * s
+            i += 2
+        }
+        return if (samples == 0) 0.0 else kotlin.math.sqrt(sum / samples)
     }
 
     fun stop() {
