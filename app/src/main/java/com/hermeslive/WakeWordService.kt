@@ -153,6 +153,7 @@ class WakeWordService : Service() {
         }
         applyWakeWordState()
         updateNotification()
+        maybeStop()
         return START_STICKY
     }
 
@@ -218,6 +219,9 @@ class WakeWordService : Service() {
         applyWakeWordState()
         updateNotification()
         notifyUi()
+        // Décocher l'écoute doit TOUT éteindre quand il n'y a pas de session :
+        // service foreground arrêté, notification supprimée, micro libéré.
+        maybeStop()
     }
 
     fun isConfigured(): Boolean = url().isNotBlank() && token().isNotBlank()

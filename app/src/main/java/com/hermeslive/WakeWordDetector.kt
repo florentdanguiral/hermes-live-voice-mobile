@@ -35,7 +35,9 @@ class WakeWordDetector(private val context: Context, private val onDetected: () 
     @Volatile private var running = false
 
     fun start() {
-        if (running) return
+        // Un seul thread d'écoute à la fois : si l'arrêt précédent n'a pas eu le
+        // temps de finir, on n'ouvre pas un second AudioRecord.
+        if (running || thread?.isAlive == true) return
         running = true
         thread = Thread({
             try {
@@ -134,7 +136,9 @@ class WakeWordDetector(private val context: Context, private val onDetected: () 
 
     fun stop() {
         running = false
-        thread?.join(1000)
+        // Le thread sort de sa boucle au retour du read (~20 ms) ; on lui laisse
+        // le temps de fermer et relâcher l'AudioRecord (sinon le micro reste vert).
+        thread?.join(2000)
         thread = null
     }
 
