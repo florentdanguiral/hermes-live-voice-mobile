@@ -12,17 +12,22 @@ import java.io.FileOutputStream
 import java.util.zip.ZipInputStream
 
 /**
- * Wake word « hey hermes » via Vosk (modèle small-fr embarqué, grammaire restreinte).
- * Gate RMS : Vosk ne reçoit l'audio que quand l'énergie dépasse le seuil —
- * en silence, la détection ne consomme quasi rien (batterie).
+ * Wake word « hey hermes » via Vosk (modèle small-fr 16 kHz embarqué, grammaire
+ * restreinte). Validé empiriquement : le modèle exige du 16 kHz (le micro
+ * capture en 48 kHz, on décime par 3) et le match apparaît dans les résultats
+ * PARTIELS (« hey » -> « hermes »), rarement en final.
+ *
+ * Gate RMS : en silence, Vosk ne reçoit rien (batterie) et l'état partiel est
+ * purgé pour éviter les faux matchs résiduels.
  */
 class WakeWordDetector(private val context: Context, private val onDetected: () -> Unit) {
 
     companion object {
-        private const val SAMPLE_RATE = 48000
+        private const val MIC_SAMPLE_RATE = 48000
+        private const val VOSK_SAMPLE_RATE = 16000f
         private const val GRAMMAR = """["hey hermes", "hermes", "[unk]"]"""
-        private const val CHUNK = 2048 // octets, 16 bits mono
-        private const val SPEECH_RMS_THRESHOLD = 900.0 // ~ -31 dBFS, seuil d'entrée Vosk
+        private const val CHUNK = 2048 // octets PCM16 @ 48 kHz
+        private const val SPEECH_RMS_THRESHOLD = 600.0 // seuil d'entrée Vosk
     }
 
     private var model: Model? = null
@@ -35,13 +40,13 @@ class WakeWordDetector(private val context: Context, private val onDetected: () 
         thread = Thread({
             try {
                 val m = model ?: loadModel(context).also { model = it }
-                val recognizer = Recognizer(m, SAMPLE_RATE.toFloat(), GRAMMAR)
+                val recognizer = Recognizer(m, VOSK_SAMPLE_RATE, GRAMMAR)
                 val minBuf = AudioRecord.getMinBufferSize(
-                    SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                    MIC_SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
                 )
                 val rec = AudioRecord(
                     MediaRecorder.AudioSource.MIC,
-                    SAMPLE_RATE,
+                    MIC_SAMPLE_RATE,
                     AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT,
                     maxOf(minBuf, CHUNK * 4),
@@ -57,7 +62,6 @@ class WakeWordDetector(private val context: Context, private val onDetected: () 
                     val n = rec.read(buf, 0, buf.size)
                     if (n <= 0) continue
                     if (rms16(buf, n) < SPEECH_RMS_THRESHOLD) {
-                        // Retour au silence : on purge l'état partiel du recognizer.
                         if (!wasSilent) {
                             recognizer.reset()
                             wasSilent = true
@@ -65,9 +69,30 @@ class WakeWordDetector(private val context: Context, private val onDetected: () 
                         continue
                     }
                     wasSilent = false
-                    if (recognizer.acceptWaveForm(buf, n)) {
-                        val text = JSONObject(recognizer.result).optString("text", "")
-                        if (matches(text)) {
+                    // Décimation 48 kHz -> 16 kHz (un échantillon sur trois).
+                    val samples = n / 2
+                    val out = ByteArray((samples / 3) * 2)
+                    var o = 0
+                    var i = 0
+                    while (i + 5 < n) {
+                        out[o] = buf[i]
+                        out[o + 1] = buf[i + 1]
+                        o += 2
+                        i += 6
+                    }
+                    if (recognizer.acceptWaveForm(out, o)) {
+                        val final = JSONObject(recognizer.result).optString("text", "")
+                        if (matches(final)) {
+                            rec.stop()
+                            rec.release()
+                            onDetected()
+                            return@Thread
+                        }
+                    } else {
+                        // Les phrases courtes ne produisent pas de final fiable :
+                        // le match vit dans les résultats partiels.
+                        val partial = JSONObject(recognizer.partialResult).optString("partial", "")
+                        if (matches(partial)) {
                             rec.stop()
                             rec.release()
                             onDetected()
