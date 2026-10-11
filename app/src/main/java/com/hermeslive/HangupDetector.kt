@@ -20,6 +20,7 @@ class HangupDetector(private val context: Context, private val onDetected: () ->
     private var recognizer: Recognizer? = null
     private var gate = PcmGate()
     private var wasSilent = false
+    private var startedAt = 0L
     @Volatile var running = false
         private set
 
@@ -28,6 +29,7 @@ class HangupDetector(private val context: Context, private val onDetected: () ->
         try {
             recognizer = Recognizer(ModelStore.get(context), VOSK_SAMPLE_RATE, GRAMMAR)
             gate = PcmGate()
+            startedAt = System.currentTimeMillis()
             running = true
         } catch (_: Throwable) {
             recognizer = null
@@ -43,6 +45,9 @@ class HangupDetector(private val context: Context, private val onDetected: () ->
     /** Trame brute PCM16 @ 48 kHz du micro de la session. */
     fun feed(pcm48: ByteArray, len: Int) {
         if (!running) return
+        // Période de grâce : la fin du « hey hermes » qui a déclenché la session
+        // ne doit pas être mappée par la grammaire de raccroché.
+        if (System.currentTimeMillis() - startedAt < 2_000) return
         val rec = recognizer ?: return
         val rms = rms16(pcm48, len)
         if (!gate.open(rms, System.currentTimeMillis())) {
@@ -74,14 +79,18 @@ class HangupDetector(private val context: Context, private val onDetected: () ->
         }
     }
 
-    /** Racines des phrases de fin (accents français neutralisés par le lexique).
-     * Validé empiriquement : « au revoir hermes » sort en partial « revoir hermes ». */
+    /**
+     * Phrase COMPLÈTE exigée : la grammaire force toute parole à mapper sur
+     * l'une de ses phrases — un matching par racine (« revoir ») déclenchait
+     * des faux positifs sur n'importe quelle phrase parlée.
+     */
     private fun matches(text: String): Boolean {
-        val normalized = text.lowercase().replace(Regex("[èéê]"), "e")
-        return normalized.contains("raccroch") ||
-            normalized.contains("revoir") ||
-            normalized.contains("merci herm") ||
-            normalized.contains("stop herm")
+        val n = text.lowercase().replace(Regex("[èéê]"), "e")
+        return n.contains("raccroche") ||
+            n.contains("raccrocher") ||
+            n.contains("au revoir hermes") ||
+            n.contains("merci hermes") ||
+            n.contains("stop hermes")
     }
 
     private fun rms16(buf: ByteArray, len: Int): Double {
