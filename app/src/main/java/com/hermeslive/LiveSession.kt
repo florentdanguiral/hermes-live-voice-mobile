@@ -69,7 +69,7 @@ class LiveSession(
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 ready = false
                 if (userClosed) {
-                    listener.onClosed()
+                    listener.onClosed(1000, "fermeture locale")
                 } else {
                     listener.onConnectionFailed(t.message ?: "connection failed")
                 }
