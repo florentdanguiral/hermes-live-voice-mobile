@@ -23,10 +23,13 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
         const val OUTPUT_SAMPLE_RATE = 24000
         private const val MIC_CHUNK_BYTES = 2400   // 25 ms @ 48 kHz mono 16 bits
         private const val OUT_FRAME_BYTES = 2400  // 50 ms @ 24 kHz mono 16 bits
-        /** Gain numérique sur l'audio envoyé au serveur : la voix doit atteindre
-         * RMS ~0.03+ côté serveur pour que Voxtral la transcrive — observé en
-         * télémétrie : sous ~0.02, le STT ne produit rien. */
-        private const val OUTPUT_GAIN = 4.0f
+        /** AGC : cible RMS ~0.05 côté serveur (zone où le STT transcrit).
+         * Le gain fixe x4 saturait quand on parle près du téléphone (pics à
+         * pleine échelle constatés en télémétrie) ; l'AGC adapte le gain à la
+         * voix observée, borné [1,0 ; 6,0]. */
+        private const val AGC_TARGET_RMS = 1600.0 // échelle 16 bits (~0.05 normalisé)
+        private const val AGC_MIN_GAIN = 1.0f
+        private const val AGC_MAX_GAIN = 6.0f
     }
 
     private var record: AudioRecord? = null
@@ -79,7 +82,7 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
                     src += 4
                 }
                 if (filled >= out.size) {
-                    onFrame(applyGain(out.copyOf()))
+                    onFrame(applyAgc(out.copyOf()))
                     filled = 0
                 }
             }
@@ -98,13 +101,34 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
         micThread = null
     }
 
-    /** Gain x2 avec protection d'écrêtage, sur les trames PCM16 sortantes. */
-    private fun applyGain(pcm: ByteArray): ByteArray {
-        val out = ByteArray(pcm.size)
+    /** AGC doux : la voix observée (RMS EMA) pilote le gain, borné et lissé. */
+    private var agcSpeechRms = 0.0
+    private var agcGain = 2.0f
+
+    private fun applyAgc(pcm: ByteArray): ByteArray {
+        // RMS de la trame (échelle 16 bits)
+        var sum = 0.0
         var i = 0
+        val samples = pcm.size / 2
+        while (i + 1 < pcm.size) {
+            val s = ((pcm[i + 1].toInt() shl 8) or pcm[i].toInt()).toShort().toDouble()
+            sum += s * s
+            i += 2
+        }
+        val rms = if (samples == 0) 0.0 else kotlin.math.sqrt(sum / samples)
+        // La EMA ne suit que les trames significatives (parole), pas le silence.
+        if (rms > 400) {
+            agcSpeechRms = 0.9 * agcSpeechRms + 0.1 * rms
+        }
+        if (agcSpeechRms > 100) {
+            val wanted = (AGC_TARGET_RMS / agcSpeechRms).toFloat().coerceIn(AGC_MIN_GAIN, AGC_MAX_GAIN)
+            agcGain = 0.95f * agcGain + 0.05f * wanted
+        }
+        val out = ByteArray(pcm.size)
+        i = 0
         while (i + 1 < pcm.size) {
             val s = ((pcm[i + 1].toInt() shl 8) or pcm[i].toInt()).toShort().toInt()
-            val g = (s * OUTPUT_GAIN).toInt().coerceIn(-32768, 32767)
+            val g = (s * agcGain).toInt().coerceIn(-32768, 32767)
             out[i] = (g and 0xFF).toByte()
             out[i + 1] = ((g shr 8) and 0xFF).toByte()
             i += 2
