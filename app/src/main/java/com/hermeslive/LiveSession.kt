@@ -27,7 +27,7 @@ class LiveSession(
         fun onResponseStarted()
         fun onResponseCompleted()
         fun onSessionError(message: String, recoverable: Boolean)
-        fun onClosed()
+        fun onClosed(code: Int, reason: String)
         fun onConnectionFailed(reason: String)
     }
 
@@ -77,7 +77,7 @@ class LiveSession(
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 ready = false
-                listener.onClosed()
+                listener.onClosed(code, reason.ifEmpty { "sans raison" })
             }
         })
     }

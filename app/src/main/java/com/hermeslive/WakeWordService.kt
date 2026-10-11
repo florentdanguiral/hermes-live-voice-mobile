@@ -76,7 +76,7 @@ class WakeWordService : Service() {
                 sessionActive = true
                 setStatus(getString(R.string.status_ready, model))
                 audio?.startMic()
-                hangup?.start()
+                if (hangupVoiceEnabled()) hangup?.start()
                 updateNotification()
             }
         }
@@ -122,8 +122,11 @@ class WakeWordService : Service() {
             }
         }
 
-        override fun onClosed() {
-            mainHandler.post { onDisconnected(getString(R.string.status_disconnected)) }
+        override fun onClosed(code: Int, reason: String) {
+            mainHandler.post {
+                transcriptLines.add(getString(R.string.disconnected_log, code, reason))
+                onDisconnected(getString(R.string.status_disconnected))
+            }
         }
 
         override fun onConnectionFailed(reason: String) {
@@ -405,4 +408,8 @@ class WakeWordService : Service() {
     private fun url() = prefs().getString("url", "") ?: ""
     private fun token() = prefs().getString("token", "") ?: ""
     fun bargeIn(): Boolean = prefs().getBoolean("barge_in", true)
+
+    /** Raccroché vocal : désactivé par défaut — la grammaire forcée de Vosk
+     * peut mapper de la parole ordinaire sur une phrase de fin. */
+    fun hangupVoiceEnabled(): Boolean = prefs().getBoolean("hangup_voice", false)
 }

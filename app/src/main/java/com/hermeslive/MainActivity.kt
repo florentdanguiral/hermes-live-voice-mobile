@@ -297,9 +297,14 @@ class MainActivity : Activity() {
             text = getString(R.string.settings_barge_in)
             isChecked = prefs().getBoolean("barge_in", true)
         }
+        val hangupSwitch = Switch(this).apply {
+            text = getString(R.string.settings_hangup_voice)
+            isChecked = prefs().getBoolean("hangup_voice", false)
+        }
         layout.addView(urlInput)
         layout.addView(tokenInput)
         layout.addView(bargeSwitch)
+        layout.addView(hangupSwitch)
         val usageButton = Button(this).apply {
             setText(R.string.settings_usage_access)
             setOnClickListener {
@@ -315,6 +320,7 @@ class MainActivity : Activity() {
                     .putString("url", urlInput.text.toString().trim())
                     .putString("token", tokenInput.text.toString().trim())
                     .putBoolean("barge_in", bargeSwitch.isChecked)
+                    .putBoolean("hangup_voice", hangupSwitch.isChecked)
                     .apply()
                 loadConversations()
             }

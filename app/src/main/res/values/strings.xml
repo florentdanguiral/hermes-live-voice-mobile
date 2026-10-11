@@ -27,6 +27,8 @@
     <string name="context_none">Contexte : écran d\'accueil</string>
     <string name="context_no_access">Contexte : autorisez l\'accès aux usages dans les réglages</string>
     <string name="context_mic">Micro : %1$d</string>
+    <string name="disconnected_log">— Déconnecté (code %1$d : %2$s)</string>
+    <string name="settings_hangup_voice">Raccroché vocal (« raccroche », « merci hermes ») — peut couper à tort sur la grammaire forcée</string>
 
     <string name="notification_channel">Assistant vocal</string>
     <string name="notification_channel_desc">Écoute permanente de « Hey Hermes » et sessions vocales</string>
