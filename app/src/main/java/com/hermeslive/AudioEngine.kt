@@ -23,10 +23,10 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
         const val OUTPUT_SAMPLE_RATE = 24000
         private const val MIC_CHUNK_BYTES = 2400   // 25 ms @ 48 kHz mono 16 bits
         private const val OUT_FRAME_BYTES = 2400  // 50 ms @ 24 kHz mono 16 bits
-        /** Gain numérique sur l'audio envoyé au serveur : certains micros
-         * (source VOICE_COMMUNICATION, AEC) délivrent une voix très faible
-         * (RMS ~0.01 côté serveur, sous le seuil VAD). */
-        private const val OUTPUT_GAIN = 2.0f
+        /** Gain numérique sur l'audio envoyé au serveur : la voix doit atteindre
+         * RMS ~0.03+ côté serveur pour que Voxtral la transcrive — observé en
+         * télémétrie : sous ~0.02, le STT ne produit rien. */
+        private const val OUTPUT_GAIN = 4.0f
     }
 
     private var record: AudioRecord? = null
@@ -47,7 +47,11 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
                 MIC_SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
             )
             val rec = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                // Source MIC (et non VOICE_COMMUNICATION) : l'AEC/NS de
+                // VOICE_COMMUNICATION écrase le signal — télémétrie : le wake
+                // word (source MIC) est reconnu à distance là où l'audio de
+                // session n'était pas transcrit par Voxtral.
+                MediaRecorder.AudioSource.MIC,
                 MIC_SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
