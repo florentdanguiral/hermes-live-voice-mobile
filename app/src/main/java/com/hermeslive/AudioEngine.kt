@@ -23,6 +23,10 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
         const val OUTPUT_SAMPLE_RATE = 24000
         private const val MIC_CHUNK_BYTES = 2400   // 25 ms @ 48 kHz mono 16 bits
         private const val OUT_FRAME_BYTES = 2400  // 50 ms @ 24 kHz mono 16 bits
+        /** Gain numérique sur l'audio envoyé au serveur : certains micros
+         * (source VOICE_COMMUNICATION, AEC) délivrent une voix très faible
+         * (RMS ~0.01 côté serveur, sous le seuil VAD). */
+        private const val OUTPUT_GAIN = 2.0f
     }
 
     private var record: AudioRecord? = null
@@ -71,7 +75,7 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
                     src += 4
                 }
                 if (filled >= out.size) {
-                    onFrame(out.copyOf())
+                    onFrame(applyGain(out.copyOf()))
                     filled = 0
                 }
             }
@@ -88,6 +92,20 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
         micRunning = false
         micThread?.join(500)
         micThread = null
+    }
+
+    /** Gain x2 avec protection d'écrêtage, sur les trames PCM16 sortantes. */
+    private fun applyGain(pcm: ByteArray): ByteArray {
+        val out = ByteArray(pcm.size)
+        var i = 0
+        while (i + 1 < pcm.size) {
+            val s = ((pcm[i + 1].toInt() shl 8) or pcm[i].toInt()).toShort().toInt()
+            val g = (s * OUTPUT_GAIN).toInt().coerceIn(-32768, 32767)
+            out[i] = (g and 0xFF).toByte()
+            out[i + 1] = ((g shr 8) and 0xFF).toByte()
+            i += 2
+        }
+        return out
     }
 
     /** Démarre la lecture TTS à la fréquence demandée par le serveur. */
