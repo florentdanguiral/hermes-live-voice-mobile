@@ -7,16 +7,25 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.media.audiofx.NoiseSuppressor
+import android.util.Log
 
 /**
  * Capture micro 48 kHz mono PCM16 (VOICE_COMMUNICATION pour l'annulation d'écho),
  * décimation x2 vers 24 kHz, trames de 50 ms rendues au consommateur.
  * Lecture : AudioTrack 24 kHz en streaming pour le TTS.
+ *
+ * NoiseSuppressor : réduction de bruit côté Android (quand disponible sur
+ * l'appareil) pour les environnements bruyants (cuisine, route). Activé
+ * via [noiseSuppression].
  */
 class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
 
     /** Second consommateur optionnel des trames brutes 48 kHz (raccroché vocal). */
     @Volatile var rawSink: ((ByteArray, Int) -> Unit)? = null
+
+    /** Active la réduction de bruit Android (NoiseSuppressor) sur le micro. */
+    @Volatile var noiseSuppression: Boolean = true
 
     companion object {
         const val MIC_SAMPLE_RATE = 48000
@@ -30,9 +39,11 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
         private const val AGC_TARGET_RMS = 1600.0 // échelle 16 bits (~0.05 normalisé)
         private const val AGC_MIN_GAIN = 1.0f
         private const val AGC_MAX_GAIN = 6.0f
+        private const val TAG = "HermesLive.Audio"
     }
 
     private var record: AudioRecord? = null
+    private var noiseSuppressor: NoiseSuppressor? = null
     private var micThread: Thread? = null
     @Volatile private var micRunning = false
 
@@ -65,6 +76,25 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
                 return@Thread
             }
             record = rec
+            // Réduction de bruit Android : améliore le SNR en environnement
+            // bruyant (eau qui bout, route). Disponibilité non garantie sur
+            // tous les appareils — on dégrade silencieusement si absent.
+            if (noiseSuppression) {
+                try {
+                    if (NoiseSuppressor.isAvailable()) {
+                        val ns = NoiseSuppressor(rec.audioSessionId)
+                        if (ns != null) {
+                            ns.enabled = true
+                            noiseSuppressor = ns
+                            Log.i(TAG, "NoiseSuppressor activé (session ${rec.audioSessionId})")
+                        }
+                    } else {
+                        Log.i(TAG, "NoiseSuppressor non disponible sur cet appareil")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "NoiseSuppressor échec: ${e.message}")
+                }
+            }
             rec.startRecording()
             val mic = ByteArray(MIC_CHUNK_BYTES)
             val out = ByteArray(OUT_FRAME_BYTES)
@@ -92,6 +122,11 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
             }
             rec.release()
             record = null
+            try {
+                noiseSuppressor?.release()
+            } catch (_: Exception) {
+            }
+            noiseSuppressor = null
         }, "hermes-mic").apply { start() }
     }
 

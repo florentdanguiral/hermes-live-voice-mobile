@@ -21,6 +21,7 @@ class WakeWordDetector(
     private val context: Context,
     private val onDetected: () -> Unit,
     private val onLevel: (Double) -> Unit = {},
+    private val noisyMode: Boolean = false,
 ) {
 
     companion object {
@@ -28,6 +29,9 @@ class WakeWordDetector(
         private const val VOSK_SAMPLE_RATE = 16000f
         private const val GRAMMAR = """["hey hermes", "hermes", "[unk]"]"""
         private const val CHUNK = 2048 // octets PCM16 @ 48 kHz
+        /** Mode bruyant : seuil 50 % plus haut pour éviter les faux positifs. */
+        private const val NOISY_SENSITIVITY_FACTOR = 4.5
+        private const val NORMAL_SENSITIVITY_FACTOR = 3.0
     }
 
     private var model: Model? = null
@@ -59,7 +63,9 @@ class WakeWordDetector(
                 }
                 rec.startRecording()
                 val buf = ByteArray(CHUNK)
-                val gate = PcmGate()
+                val gate = PcmGate(
+                    if (noisyMode) NOISY_SENSITIVITY_FACTOR else NORMAL_SENSITIVITY_FACTOR,
+                )
                 var wasSilent = false
                 while (running) {
                     val n = rec.read(buf, 0, buf.size)

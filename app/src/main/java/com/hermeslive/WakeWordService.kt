@@ -280,6 +280,7 @@ class WakeWordService : Service() {
     private fun applyWakeWordState() {
         val enabled = isWakeEnabled()
         if (enabled && session == null && hasMicPermission()) {
+            val noisy = prefs().getBoolean("noisy_mode", false)
             if (wake == null) {
                 wake = WakeWordDetector(
                     this,
@@ -292,6 +293,7 @@ class WakeWordService : Service() {
                             mainHandler.post { notifyUi() }
                         }
                     },
+                    noisyMode = noisy,
                 )
             }
             wake?.start()
@@ -412,4 +414,8 @@ class WakeWordService : Service() {
     /** Raccroché vocal : désactivé par défaut — la grammaire forcée de Vosk
      * peut mapper de la parole ordinaire sur une phrase de fin. */
     fun hangupVoiceEnabled(): Boolean = prefs().getBoolean("hangup_voice", false)
+
+    /** Mode bruyant : sensibilité réduite du wake word (moins de faux
+     * positifs sur le bruit ambiant : eau, route, vent). */
+    fun isNoisyMode(): Boolean = prefs().getBoolean("noisy_mode", false)
 }

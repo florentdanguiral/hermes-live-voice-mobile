@@ -42,4 +42,5 @@
     <string name="settings_token_hint">Jeton d\'accès</string>
     <string name="settings_usage_access">Autoriser l\'accès aux usages (contexte app)</string>
     <string name="settings_barge_in">Barge-in : parler pendant la réponse pour l\'interrompre</string>
+    <string name="settings_noisy_mode">Mode bruyant : moins sensible aux bruits ambiants (cuisine, route)</string>
 </resources>

@@ -301,10 +301,15 @@ class MainActivity : Activity() {
             text = getString(R.string.settings_hangup_voice)
             isChecked = prefs().getBoolean("hangup_voice", false)
         }
+        val noisySwitch = Switch(this).apply {
+            text = getString(R.string.settings_noisy_mode)
+            isChecked = prefs().getBoolean("noisy_mode", false)
+        }
         layout.addView(urlInput)
         layout.addView(tokenInput)
         layout.addView(bargeSwitch)
         layout.addView(hangupSwitch)
+        layout.addView(noisySwitch)
         val usageButton = Button(this).apply {
             setText(R.string.settings_usage_access)
             setOnClickListener {
@@ -316,12 +321,21 @@ class MainActivity : Activity() {
             .setTitle(R.string.settings_title)
             .setView(layout)
             .setPositiveButton(android.R.string.ok) { _, _ ->
+                val oldNoisy = prefs().getBoolean("noisy_mode", false)
+                val newNoisy = noisySwitch.isChecked
                 prefs().edit()
                     .putString("url", urlInput.text.toString().trim())
                     .putString("token", tokenInput.text.toString().trim())
                     .putBoolean("barge_in", bargeSwitch.isChecked)
                     .putBoolean("hangup_voice", hangupSwitch.isChecked)
+                    .putBoolean("noisy_mode", newNoisy)
                     .apply()
+                // Si le mode bruyant a changé et que le wake word est actif,
+                // on le redémarre pour appliquer la nouvelle sensibilité.
+                if (oldNoisy != newNoisy && service?.isWakeEnabled() == true) {
+                    service?.setWakeEnabled(false)
+                    service?.setWakeEnabled(true)
+                }
                 loadConversations()
             }
             .setNegativeButton(android.R.string.cancel, null)
