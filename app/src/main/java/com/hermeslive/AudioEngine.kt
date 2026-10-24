@@ -82,7 +82,7 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
             if (noiseSuppression) {
                 try {
                     if (NoiseSuppressor.isAvailable()) {
-                        val ns = NoiseSuppressor(rec.audioSessionId)
+                        val ns = NoiseSuppressor.create(rec.audioSessionId)
                         if (ns != null) {
                             ns.enabled = true
                             noiseSuppressor = ns
