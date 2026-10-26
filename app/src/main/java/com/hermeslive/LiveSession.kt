@@ -128,14 +128,14 @@ class LiveSession(
         return match.groupValues[1].toIntOrNull() ?: 24000
     }
 
-    /** pcm : trame PCM16 little-endian à la fréquence d'entrée (24 kHz). */
+    /** pcm : trame PCM16 little-endian à la fréquence d'entrée (16 kHz). */
     fun sendAudioFrame(pcm: ByteArray) {
         if (!ready) return
         val payload = JSONObject()
             .put("type", "audio.input")
             .put("id", "a-${requestIds.getAndIncrement()}")
             .put("data", android.util.Base64.encodeToString(pcm, android.util.Base64.NO_WRAP))
-            .put("mimeType", "audio/pcm;rate=24000")
+            .put("mimeType", "audio/pcm;rate=16000")
         socket?.send(payload.toString())
     }
 

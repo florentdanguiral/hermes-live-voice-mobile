@@ -32,9 +32,12 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
 
     companion object {
         const val MIC_SAMPLE_RATE = 48000
-        const val OUTPUT_SAMPLE_RATE = 24000
+        // 16 kHz : le STT Voxtral attend du 16 kHz. Envoyer directement du
+        // 16 kHz élimine la conversion serveur (24k->16k) et simplifie la
+        // chaîne. La lecture TTS reste en 24 kHz (sampleRate du serveur).
+        const val OUTPUT_SAMPLE_RATE = 16000
         private const val MIC_CHUNK_BYTES = 2400   // 25 ms @ 48 kHz mono 16 bits
-        private const val OUT_FRAME_BYTES = 2400  // 50 ms @ 24 kHz mono 16 bits
+        private const val OUT_FRAME_BYTES = 1600  // 50 ms @ 16 kHz mono 16 bits
         /** AGC : cible RMS ~0.05 côté serveur (zone où le STT transcrit).
          * Le gain fixe x4 saturait quand on parle près du téléphone (pics à
          * pleine échelle constatés en télémétrie) ; l'AGC adapte le gain à la
@@ -106,16 +109,18 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
                 val n = rec.read(mic, 0, mic.size)
                 if (n <= 0) continue
                 rawSink?.invoke(mic, n)
-                // Décimation x2 (48 kHz -> 24 kHz) : un échantillon sur deux.
+                // Décimation x3 (48 kHz -> 16 kHz) : un échantillon sur trois.
+                // 16 kHz = natif STT Voxtral, pas de conversion serveur.
                 var src = 0
-                while (src + 4 <= n && filled + 2 <= out.size) {
+                while (src + 6 <= n && filled + 2 <= out.size) {
                     out[filled] = mic[src]
                     out[filled + 1] = mic[src + 1]
                     filled += 2
-                    src += 4
+                    src += 6
                 }
                 if (filled >= out.size) {
-                    onFrame(applyAgc(out.copyOf()))
+                    // AGC désactivé temporairement (test de qualité audio).
+                    onFrame(out.copyOf())
                     filled = 0
                 }
             }
