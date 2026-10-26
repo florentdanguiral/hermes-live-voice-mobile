@@ -24,8 +24,11 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
     /** Second consommateur optionnel des trames brutes 48 kHz (raccroché vocal). */
     @Volatile var rawSink: ((ByteArray, Int) -> Unit)? = null
 
-    /** Active la réduction de bruit Android (NoiseSuppressor) sur le micro. */
-    @Volatile var noiseSuppression: Boolean = true
+    /** Active la réduction de bruit Android (NoiseSuppressor) sur le micro.
+     * DÉSACTIVÉ par défaut : sur certains appareils (GrapheneOS), le
+     * NoiseSuppressor avec AudioSource.MIC produit un audio illisible pour
+     * le STT (transcription vide). À réactiver manuellement si besoin. */
+    @Volatile var noiseSuppression: Boolean = false
 
     companion object {
         const val MIC_SAMPLE_RATE = 48000
