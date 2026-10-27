@@ -118,7 +118,10 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
                     src += 6
                 }
                 if (filled >= out.size) {
-                    onFrame(applyAgc(out.copyOf()))
+                    // AGC désactivé : même avec gain max 3.0, l'AGC déforme
+                    // l'audio au point que le STT ne transcrit plus. Gain fixe
+                    // 1.0 — parler un peu plus fort/près du micro compense.
+                    onFrame(out.copyOf())
                     filled = 0
                 }
             }
