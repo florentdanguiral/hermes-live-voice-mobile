@@ -409,7 +409,10 @@ class WakeWordService : Service() {
     private fun prefs() = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private fun url() = prefs().getString("url", "") ?: ""
     private fun token() = prefs().getString("token", "") ?: ""
-    fun bargeIn(): Boolean = prefs().getBoolean("barge_in", true)
+    /** Barge-in désactivé par défaut : le micro est coupé pendant la réponse
+     * de Marie (half-duplex strict) — évite le feedback (Marie s'entend
+     * elle-même via le haut-parleur). À réactiver manuellement si besoin. */
+    fun bargeIn(): Boolean = prefs().getBoolean("barge_in", false)
 
     /** Raccroché vocal : désactivé par défaut — la grammaire forcée de Vosk
      * peut mapper de la parole ordinaire sur une phrase de fin. */

@@ -295,7 +295,7 @@ class MainActivity : Activity() {
         }
         val bargeSwitch = Switch(this).apply {
             text = getString(R.string.settings_barge_in)
-            isChecked = prefs().getBoolean("barge_in", true)
+            isChecked = prefs().getBoolean("barge_in", false)
         }
         val hangupSwitch = Switch(this).apply {
             text = getString(R.string.settings_hangup_voice)

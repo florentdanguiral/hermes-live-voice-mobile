@@ -38,13 +38,12 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
         const val OUTPUT_SAMPLE_RATE = 16000
         private const val MIC_CHUNK_BYTES = 2400   // 25 ms @ 48 kHz mono 16 bits
         private const val OUT_FRAME_BYTES = 1600  // 50 ms @ 16 kHz mono 16 bits
-        /** AGC : cible RMS ~0.05 côté serveur (zone où le STT transcrit).
-         * Le gain fixe x4 saturait quand on parle près du téléphone (pics à
-         * pleine échelle constatés en télémétrie) ; l'AGC adapte le gain à la
-         * voix observée, borné [1,0 ; 6,0]. */
-        private const val AGC_TARGET_RMS = 1600.0 // échelle 16 bits (~0.05 normalisé)
+        /** AGC doux : cible RMS ~0.03, gain borné [1,0 ; 3,0]. Le gain max
+         * agressif (x6) déformait l'audio (STT illisible). x3 suffit pour
+         * relever une voix faible sans saturer. */
+        private const val AGC_TARGET_RMS = 1000.0 // échelle 16 bits (~0.03 normalisé)
         private const val AGC_MIN_GAIN = 1.0f
-        private const val AGC_MAX_GAIN = 6.0f
+        private const val AGC_MAX_GAIN = 3.0f
         private const val TAG = "HermesLive.Audio"
     }
 
@@ -119,8 +118,7 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
                     src += 6
                 }
                 if (filled >= out.size) {
-                    // AGC désactivé temporairement (test de qualité audio).
-                    onFrame(out.copyOf())
+                    onFrame(applyAgc(out.copyOf()))
                     filled = 0
                 }
             }
