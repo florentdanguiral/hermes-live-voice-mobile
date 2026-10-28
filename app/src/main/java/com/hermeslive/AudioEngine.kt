@@ -9,6 +9,9 @@ import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.media.audiofx.NoiseSuppressor
 import android.util.Log
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Capture micro 48 kHz mono PCM16 (VOICE_COMMUNICATION pour l'annulation d'écho),
@@ -44,6 +47,10 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
         private const val AGC_TARGET_RMS = 1000.0 // échelle 16 bits (~0.03 normalisé)
         private const val AGC_MIN_GAIN = 1.0f
         private const val AGC_MAX_GAIN = 3.0f
+        /** File de lecture TTS max ~62 s à 24 kHz (3 Mo). Au-delà, on lâche les
+         * plus anciennes trames : une réponse interminable ne doit ni faire
+         * exploser la mémoire ni bloquer le thread WebSocket. */
+        private const val MAX_QUEUED_PLAYBACK_BYTES = 3 * 1024 * 1024
         private const val TAG = "HermesLive.Audio"
     }
 
@@ -53,9 +60,20 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
     @Volatile private var micRunning = false
 
     private var track: AudioTrack? = null
+    private var playbackThread: Thread? = null
+    private var playbackWriterAlive: AtomicBoolean? = null
     private var totalWritten = 0L
     @Volatile var playbackActive = false
         private set
+
+    // File bornée entre le thread lecteur WebSocket et le thread de lecture.
+    // Le serveur envoie toute la réponse TTS en rafale ; AudioTrack.write()
+    // bloque quand son buffer est plein, et l'appeler depuis le thread lecteur
+    // OkHttp bloquerait le traitement des pongs — le watchdog ping (20 s)
+    // tuerait alors la connexion en pleine parole ("sent ping but didn't
+    // receive pong"). Ici writePcm() n'est jamais bloquant.
+    private val playbackQueue = ConcurrentLinkedQueue<ByteArray>()
+    private val queuedBytes = AtomicLong(0)
 
     @SuppressLint("MissingPermission") // permission vérifiée par l'appelant
     fun startMic() {
@@ -197,19 +215,51 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
                 .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                 .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                 .build(),
-            maxOf(minBuf, OUT_FRAME_BYTES * 8),
+            maxOf(minBuf, sampleRate * 2), // ~1 s de tampon
             AudioTrack.MODE_STREAM,
             AudioManager.AUDIO_SESSION_ID_GENERATE,
         )
+        playbackQueue.clear()
+        queuedBytes.set(0)
         playbackActive = true
         totalWritten = 0
         track?.play()
+        startPlaybackWriter()
     }
 
-    @Synchronized
+    /** Thread dédié, seul écrivain de l'AudioTrack : write() bloquant OK ici. */
+    private fun startPlaybackWriter() {
+        val alive = AtomicBoolean(true)
+        playbackWriterAlive = alive
+        playbackThread = Thread({
+            while (alive.get()) {
+                val pcm = playbackQueue.poll()
+                if (pcm == null) {
+                    Thread.sleep(20)
+                    continue
+                }
+                queuedBytes.addAndGet(-pcm.size.toLong())
+                val t = track ?: continue
+                try {
+                    val written = t.write(pcm, 0, pcm.size)
+                    if (written > 0) synchronized(this) { totalWritten += written }
+                } catch (_: IllegalStateException) {
+                    // Track libéré (barge-in) pendant l'écriture.
+                }
+            }
+        }, "hermes-playback").apply { start() }
+    }
+
+    /** Enfile une trame TTS. Appelé depuis le thread lecteur WebSocket :
+     * jamais bloquant — l'AudioTrack est écrit par le thread de lecture. */
     fun writePcm(pcm: ByteArray) {
-        val written = track?.write(pcm, 0, pcm.size) ?: return
-        if (written > 0) totalWritten += written
+        if (!playbackActive) return
+        var queued = queuedBytes.addAndGet(pcm.size.toLong())
+        while (queued > MAX_QUEUED_PLAYBACK_BYTES) {
+            val dropped = playbackQueue.poll() ?: break
+            queued = queuedBytes.addAndGet(-dropped.size.toLong())
+        }
+        playbackQueue.offer(pcm)
     }
 
     /**
@@ -221,11 +271,11 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
         if (!playbackActive) return
         Thread({
             while (true) {
-                val done = synchronized(this) {
-                    val t = track ?: return@synchronized false
-                    (t.playbackHeadPosition * 2).toLong() >= totalWritten
+                val drained = synchronized(this) {
+                    val t = track ?: return@synchronized true
+                    playbackQueue.isEmpty() && (t.playbackHeadPosition * 2).toLong() >= totalWritten
                 }
-                if (done) break
+                if (drained) break
                 Thread.sleep(100)
             }
             stopPlayback()
@@ -235,15 +285,23 @@ class AudioEngine(private val onFrame: (ByteArray) -> Unit) {
     /** Coupe la lecture (barge-in). */
     @Synchronized
     fun stopPlayback() {
-        val t = track ?: return
-        try {
-            t.pause()
-            t.flush()
-        } catch (_: IllegalStateException) {
-        }
-        t.release()
-        track = null
         playbackActive = false
+        playbackWriterAlive?.set(false)
+        playbackWriterAlive = null
+        playbackQueue.clear()
+        queuedBytes.set(0)
+        val t = track
+        track = null
+        if (t != null) {
+            try {
+                t.pause()
+                t.flush()
+            } catch (_: IllegalStateException) {
+            }
+            t.release()
+        }
+        playbackThread?.join(300)
+        playbackThread = null
     }
 
     fun stopEverything() {
