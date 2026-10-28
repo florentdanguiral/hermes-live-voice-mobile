@@ -10,8 +10,11 @@
     <string name="status_disconnected">Déconnecté</string>
     <string name="status_connecting">Connexion…</string>
     <string name="status_ready">Connecté — parlez (%1$s)</string>
-    <string name="status_thinking">Hermes répond…</string>
+    <string name="status_thinking">Hermes réfléchit…</string>
+    <string name="status_transcribing">Transcription…</string>
+    <string name="status_speaking">Marie parle…</string>
     <string name="status_listening">À l\'écoute — parlez</string>
+    <string name="live_transcript_user">Vous dites : %1$s</string>
     <string name="status_wake">À l\'écoute de « Hey Hermes »</string>
     <string name="status_error">Erreur : %1$s</string>
     <string name="status_service_starting">Démarrage du service…</string>

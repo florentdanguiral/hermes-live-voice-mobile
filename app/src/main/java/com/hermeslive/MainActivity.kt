@@ -40,6 +40,8 @@ class MainActivity : Activity() {
     private lateinit var wakeSwitch: Switch
     private lateinit var spinner: Spinner
     private lateinit var settingsButton: Button
+    private lateinit var micLevelBar: android.widget.ProgressBar
+    private lateinit var liveTranscriptView: TextView
 
     private var service: WakeWordService? = null
     private var conversations: List<Conversation> = emptyList()
@@ -80,6 +82,8 @@ class MainActivity : Activity() {
         wakeSwitch = findViewById(R.id.wake_switch)
         spinner = findViewById(R.id.conversations)
         settingsButton = findViewById(R.id.settings_button)
+        micLevelBar = findViewById(R.id.mic_level)
+        liveTranscriptView = findViewById(R.id.live_transcript)
 
         connectButton.setOnClickListener {
             val s = service ?: return@setOnClickListener
@@ -204,20 +208,46 @@ class MainActivity : Activity() {
             return
         }
         statusView.text = s.statusText.ifEmpty { getString(R.string.status_disconnected) }
+
+        // Couleur du statut selon l'état
+        val statusColor = when (s.currentState) {
+            WakeWordService.UiState.LISTENING -> 0xFF2E7D32.toInt()    // vert
+            WakeWordService.UiState.TRANSCRIBING -> 0xFF1565C0.toInt()  // bleu
+            WakeWordService.UiState.THINKING -> 0xFF6A1B9A.toInt()      // violet
+            WakeWordService.UiState.SPEAKING -> 0xFFE65100.toInt()      // orange
+            WakeWordService.UiState.DISCONNECTED -> 0xFF757575.toInt()  // gris
+        }
+        statusView.setTextColor(statusColor)
+
+        // Barre de niveau micro (visible quand wake word actif ou session en écoute)
+        val showMicBar = (s.isWakeEnabled() && !s.sessionActive) ||
+            (s.sessionActive && s.currentState == WakeWordService.UiState.LISTENING)
+        if (showMicBar && s.lastMicRms > 0.0) {
+            micLevelBar.visibility = android.view.View.VISIBLE
+            // RMS 0-5000 → 0-100 %
+            val pct = (s.lastMicRms / 5000.0 * 100).toInt().coerceIn(0, 100)
+            micLevelBar.progress = pct
+        } else {
+            micLevelBar.visibility = android.view.View.GONE
+        }
+
+        // Transcription en cours (affichage live)
+        if (s.liveTranscript.isNotEmpty()) {
+            liveTranscriptView.visibility = android.view.View.VISIBLE
+            liveTranscriptView.text = getString(R.string.live_transcript_user, s.liveTranscript)
+        } else {
+            liveTranscriptView.visibility = android.view.View.GONE
+        }
+
         wakeSwitch.isChecked = s.isWakeEnabled()
         connectButton.isEnabled = true
         connectButton.setText(if (s.sessionActive) R.string.disconnect else R.string.connect)
 
         val foreground = s.currentForegroundApp()
-        val micLevel = if (!s.sessionActive && s.isWakeEnabled() && s.lastMicRms > 0.0) {
-            " | " + getString(R.string.context_mic, s.lastMicRms.toInt())
-        } else {
-            ""
-        }
         contextView.text = if (hasUsageAccess()) {
-            (foreground?.let { getString(R.string.context_app, appName(it)) } ?: getString(R.string.context_none)) + micLevel
+            foreground?.let { getString(R.string.context_app, appName(it)) } ?: getString(R.string.context_none)
         } else {
-            getString(R.string.context_no_access) + micLevel
+            getString(R.string.context_no_access)
         }
 
         // Transcript incrémental

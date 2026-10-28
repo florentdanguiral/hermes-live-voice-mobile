@@ -65,6 +65,15 @@ class WakeWordService : Service() {
     var sessionActive: Boolean = false
         private set
 
+    /** État courant de la session pour l'UI (couleur + barre de micro). */
+    enum class UiState { DISCONNECTED, LISTENING, TRANSCRIBING, THINKING, SPEAKING }
+    @Volatile var currentState: UiState = UiState.DISCONNECTED
+        private set
+
+    /** Transcription partielle en cours (affichée en direct dans l'UI). */
+    @Volatile var liveTranscript: String = ""
+        private set
+
     /** Niveau RMS courant du micro (diagnostic wake word), mis à jour par le détecteur. */
     @Volatile var lastMicRms: Double = 0.0
     private var lastLevelUiPush = 0L
@@ -82,12 +91,29 @@ class WakeWordService : Service() {
         }
 
         override fun onTranscript(speaker: String, text: String, final: Boolean) {
-            mainHandler.post { appendTranscript(speaker, text, final) }
+            mainHandler.post {
+                appendTranscript(speaker, text, final)
+                // Transcription partielle en cours (affichage live)
+                if (speaker == "user" && !final) {
+                    liveTranscript = pendingText.toString() + text
+                    notifyUi()
+                } else if (final) {
+                    liveTranscript = ""
+                    notifyUi()
+                }
+            }
         }
 
         override fun onAudio(pcm: ByteArray, mimeType: String) {
             if (audio?.playbackActive != true) audio?.startPlayback(outputSampleRate)
             audio?.writePcm(pcm)
+            mainHandler.post {
+                if (currentState != UiState.SPEAKING) {
+                    currentState = UiState.SPEAKING
+                    setStatus(getString(R.string.status_speaking))
+                    notifyUi()
+                }
+            }
         }
 
         override fun onSpeechStarted() {
@@ -97,20 +123,27 @@ class WakeWordService : Service() {
                 // synthétiser dans le vide avant de traiter le nouveau tour).
                 session?.sendCancel()
                 audio?.stopPlayback()
+                currentState = UiState.TRANSCRIBING
+                setStatus(getString(R.string.status_transcribing))
+                notifyUi()
             }
         }
 
         override fun onResponseStarted() {
             mainHandler.post {
+                currentState = UiState.THINKING
                 setStatus(getString(R.string.status_thinking))
                 updateNotification()
+                notifyUi()
             }
         }
 
         override fun onResponseCompleted() {
             mainHandler.post {
                 audio?.awaitDrainThenStop()
+                currentState = UiState.LISTENING
                 setStatus(getString(R.string.status_listening))
+                notifyUi()
             }
         }
 
@@ -288,7 +321,7 @@ class WakeWordService : Service() {
                     onLevel = { rms ->
                         lastMicRms = rms
                         val now = android.os.SystemClock.elapsedRealtime()
-                        if (now - lastLevelUiPush > 400) {
+                        if (now - lastLevelUiPush > 100) {
                             lastLevelUiPush = now
                             mainHandler.post { notifyUi() }
                         }
@@ -312,6 +345,8 @@ class WakeWordService : Service() {
         audio?.stopEverything()
         session = null
         sessionActive = false
+        currentState = UiState.DISCONNECTED
+        liveTranscript = ""
         setStatus(status)
         updateNotification()
         applyWakeWordState()
