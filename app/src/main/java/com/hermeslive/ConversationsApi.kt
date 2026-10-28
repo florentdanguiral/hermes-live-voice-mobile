@@ -8,6 +8,9 @@ import java.util.concurrent.TimeUnit
 /** Conversation Hermes exposée par GET /v1/conversations (Bearer token). */
 data class Conversation(val id: String, val title: String, val lastActiveAt: Long)
 
+/** Message d'une conversation Hermes (GET /v1/conversations/:id/messages). */
+data class ConversationMessage(val role: String, val content: String)
+
 class ConversationsApi(private val baseUrl: String, private val token: String) {
 
     private val client = OkHttpClient.Builder()
@@ -40,6 +43,36 @@ class ConversationsApi(private val baseUrl: String, private val token: String) {
                     )
                 }
                 result.sortedByDescending { it.lastActiveAt }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** Bloquant : appeler hors du thread UI. Retourne null en cas d'erreur. */
+    fun getMessages(conversationId: String): List<ConversationMessage>? {
+        return try {
+            val url = baseUrl.trimEnd('/') + "/v1/conversations/" +
+                java.net.URLEncoder.encode(conversationId, "UTF-8") + "/messages"
+            val request = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $token")
+                .get()
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = JSONObject(response.body?.string() ?: return null)
+                val arr = body.optJSONArray("messages") ?: return emptyList()
+                val result = ArrayList<ConversationMessage>(arr.length())
+                for (i in 0 until arr.length()) {
+                    val m = arr.getJSONObject(i)
+                    val role = m.optString("role")
+                    val content = m.optString("content")
+                    if ((role == "user" || role == "assistant") && content.isNotBlank()) {
+                        result.add(ConversationMessage(role, content))
+                    }
+                }
+                result
             }
         } catch (_: Exception) {
             null

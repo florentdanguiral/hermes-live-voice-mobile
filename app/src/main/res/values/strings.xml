@@ -25,6 +25,7 @@
     <string name="error_prefix">— %1$s</string>
     <string name="error_not_configured">Renseignez l\'URL et le jeton dans les réglages.</string>
     <string name="error_no_mic">Permission micro refusée.</string>
+    <string name="history_error">Impossible de charger l\'historique.</string>
 
     <string name="context_app">Contexte : %1$s</string>
     <string name="context_none">Contexte : écran d\'accueil</string>

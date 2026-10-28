@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.IBinder
 import android.provider.Settings
+import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
@@ -46,6 +47,7 @@ class MainActivity : Activity() {
     private var service: WakeWordService? = null
     private var conversations: List<Conversation> = emptyList()
     private var lastRenderedLines = 0
+    private var showingHistory = false
     private var assistConnectPending = false
 
     private val connection = object : ServiceConnection {
@@ -90,6 +92,12 @@ class MainActivity : Activity() {
             if (s.sessionActive) s.disconnect() else {
                 if (ensurePermissions()) connectFromUi()
             }
+        }
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                onConversationSelected(position)
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
         settingsButton.setOnClickListener { showSettings() }
         wakeSwitch.setOnCheckedChangeListener { _, checked ->
@@ -250,16 +258,22 @@ class MainActivity : Activity() {
             getString(R.string.context_no_access)
         }
 
-        // Transcript incrémental
+        // Transcript incrémental. Tant qu'un historique de conversation est affiché
+        // et que la session live ne produit rien de nouveau, on ne touche à rien.
         val lines = s.transcriptLines
-        while (lastRenderedLines < lines.size) {
-            transcriptView.append(lines[lastRenderedLines])
-            transcriptView.append("\n\n")
-            lastRenderedLines++
-        }
-        if (lines.isEmpty()) {
-            transcriptView.setText(R.string.transcript_empty)
-            lastRenderedLines = 0
+        if (showingHistory && lines.size <= lastRenderedLines) {
+            // Historique affiché, pas de nouvelle ligne live.
+        } else {
+            showingHistory = false
+            while (lastRenderedLines < lines.size) {
+                transcriptView.append(lines[lastRenderedLines])
+                transcriptView.append("\n\n")
+                lastRenderedLines++
+            }
+            if (lines.isEmpty()) {
+                transcriptView.setText(R.string.transcript_empty)
+                lastRenderedLines = 0
+            }
         }
         transcriptScroller.post { transcriptScroller.fullScroll(ScrollView.FOCUS_DOWN) }
     }
@@ -281,6 +295,49 @@ class MainActivity : Activity() {
                 val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, labels)
                 adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
                 spinner.adapter = adapter
+            }
+        }.start()
+    }
+
+    /** Sélection dans le spinner : affiche l'historique sans connecter. */
+    private fun onConversationSelected(position: Int) {
+        if (position <= 0) {
+            // « Nouvelle conversation » : on abandonne l'historique affiché, sauf si
+            // une session live est en cours (le transcript appartient à la session).
+            showingHistory = false
+            val s = service
+            if (s == null || !s.sessionActive) {
+                transcriptView.setText(R.string.transcript_empty)
+                lastRenderedLines = s?.transcriptLines?.size ?: 0
+            }
+            return
+        }
+        val conv = conversations.getOrNull(position - 1) ?: return
+        loadHistory(conv)
+    }
+
+    private fun loadHistory(conv: Conversation) {
+        showingHistory = true
+        Thread {
+            val url = prefs().getString("url", "") ?: ""
+            val token = prefs().getString("token", "") ?: ""
+            val messages = if (url.isBlank() || token.isBlank()) null
+            else ConversationsApi(baseHttpUrl(url), token).getMessages(conv.id)
+            runOnUiThread {
+                if (messages == null) {
+                    showingHistory = false
+                    Toast.makeText(this, R.string.history_error, Toast.LENGTH_SHORT).show()
+                    render()
+                    return@runOnUiThread
+                }
+                val s = service
+                // Les lignes live déjà rendues ne doivent pas réapparaître sous l'historique.
+                lastRenderedLines = s?.transcriptLines?.size ?: 0
+                transcriptView.text = messages.joinToString("\n\n") { m ->
+                    if (m.role == "user") getString(R.string.transcript_user, m.content)
+                    else getString(R.string.transcript_assistant, m.content)
+                }.ifEmpty { getString(R.string.transcript_empty) }
+                transcriptScroller.post { transcriptScroller.fullScroll(ScrollView.FOCUS_DOWN) }
             }
         }.start()
     }
