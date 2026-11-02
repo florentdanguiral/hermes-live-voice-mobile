@@ -29,7 +29,16 @@ class LiveSession(
         fun onSessionError(message: String, recoverable: Boolean)
         fun onClosed(code: Int, reason: String)
         fun onConnectionFailed(reason: String)
+        fun onTaskSnapshot(tasks: List<TaskSnapshot>) {}
     }
+
+    data class TaskSnapshot(
+        val taskId: String,
+        val title: String,
+        val state: String,
+        val priority: String,
+        val updatedAt: Double,
+    )
 
     private val client: OkHttpClient = OkHttpClient.Builder()
         .pingInterval(20, TimeUnit.SECONDS)
@@ -116,7 +125,35 @@ class LiveSession(
             "response.started" -> listener.onResponseStarted()
             "response.completed" -> listener.onResponseCompleted()
             "response.failed" -> listener.onSessionError(msg.optString("error"), true)
-            "task.snapshot", "log" -> Unit
+            "task.snapshot" -> {
+                val arr = msg.optJSONArray("tasks") ?: return
+                val tasks = (0 until arr.length()).mapNotNull { i ->
+                    val t = arr.optJSONObject(i) ?: return@mapNotNull null
+                    TaskSnapshot(
+                        taskId = t.optString("taskId"),
+                        title = t.optString("title"),
+                        state = t.optString("state"),
+                        priority = t.optString("priority", "normal"),
+                        updatedAt = t.optDouble("updatedAt", 0.0),
+                    )
+                }
+                listener.onTaskSnapshot(tasks)
+            }
+            "task.notification" -> {
+                val t = msg.optJSONObject("task") ?: msg
+                listener.onTaskSnapshot(
+                    listOf(
+                        TaskSnapshot(
+                            taskId = t.optString("taskId"),
+                            title = t.optString("title"),
+                            state = t.optString("state", "completed"),
+                            priority = t.optString("priority", "normal"),
+                            updatedAt = t.optDouble("updatedAt", 0.0),
+                        )
+                    )
+                )
+            }
+            "log" -> Unit
             else -> Unit
         }
     }
@@ -149,6 +186,24 @@ class LiveSession(
     }
 
     /** Barge-in : demande à la gateway d'annuler la réponse en cours (TTS compris). */
+    fun sendTaskList(limit: Int = 25) {
+        val id = "tasks-${requestIds.incrementAndGet()}"
+        socket?.send(JSONObject().apply {
+            put("type", "task.list")
+            put("id", id)
+            put("limit", limit)
+        }.toString())
+    }
+
+    fun sendTaskNotificationAck(taskId: String) {
+        val id = "ack-${requestIds.incrementAndGet()}"
+        socket?.send(JSONObject().apply {
+            put("type", "task.notification.ack")
+            put("id", id)
+            put("taskId", taskId)
+        }.toString())
+    }
+
     fun sendCancel() {
         if (!ready) return
         val payload = JSONObject()

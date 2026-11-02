@@ -47,6 +47,48 @@ class WakeWordService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val uiListeners = CopyOnWriteArrayList<UiListener>()
 
+    // File de Priorité : poll task.list quand la session live est active (FR-15)
+    private val taskPoller = object : Runnable {
+        override fun run() {
+            if (sessionActive) {
+                session?.sendTaskList()
+                mainHandler.postDelayed(this, 5000)
+            }
+        }
+    }
+
+    private val ackedTaskIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    private fun handleTaskSnapshot(tasks: List<LiveSession.TaskSnapshot>) {
+        val rank = mapOf("urgent" to 3, "high" to 2, "normal" to 1, "low" to 0)
+        val fresh = tasks
+            .filter { it.state == "completed" || it.state == "failed" }
+            .filter { ackedTaskIds.add(it.taskId) }
+            .sortedWith(
+                compareByDescending<LiveSession.TaskSnapshot> { rank[it.priority] ?: 1 }
+                    .thenByDescending { it.updatedAt }
+            )
+        for (task in fresh.take(3)) {
+            session?.sendTaskNotificationAck(task.taskId)
+            notifyTaskDone(task)
+        }
+    }
+
+    private fun notifyTaskDone(task: LiveSession.TaskSnapshot) {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val title = if (task.state == "completed") {
+            getString(R.string.task_done, task.title)
+        } else {
+            getString(R.string.task_failed, task.title)
+        }
+        val notif = Notification.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setAutoCancel(true)
+            .build()
+        manager.notify(task.taskId.hashCode(), notif)
+    }
+
     // Session live
     private var session: LiveSession? = null
     private var audio: AudioEngine? = null
@@ -87,7 +129,13 @@ class WakeWordService : Service() {
                 audio?.startMic()
                 if (hangupVoiceEnabled()) hangup?.start()
                 updateNotification()
+                mainHandler.removeCallbacks(taskPoller)
+                mainHandler.post(taskPoller)
             }
+        }
+
+        override fun onTaskSnapshot(tasks: List<LiveSession.TaskSnapshot>) {
+            mainHandler.post { handleTaskSnapshot(tasks) }
         }
 
         override fun onTranscript(speaker: String, text: String, final: Boolean) {
@@ -157,6 +205,7 @@ class WakeWordService : Service() {
 
         override fun onClosed(code: Int, reason: String) {
             mainHandler.post {
+                mainHandler.removeCallbacks(taskPoller)
                 transcriptLines.add(getString(R.string.disconnected_log, code, reason))
                 onDisconnected(getString(R.string.status_disconnected))
             }
@@ -260,6 +309,7 @@ class WakeWordService : Service() {
     }
 
     fun disconnect() {
+        mainHandler.removeCallbacks(taskPoller)
         hangup?.stop()
         session?.close()
         session = null
@@ -341,6 +391,7 @@ class WakeWordService : Service() {
     }
 
     private fun onDisconnected(status: String) {
+        mainHandler.removeCallbacks(taskPoller)
         hangup?.stop()
         audio?.stopEverything()
         session = null
