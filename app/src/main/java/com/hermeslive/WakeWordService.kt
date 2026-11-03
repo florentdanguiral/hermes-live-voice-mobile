@@ -186,6 +186,13 @@ class WakeWordService : Service() {
             }
         }
 
+        override fun onConversationUpdated(sessionId: String?) {
+            mainHandler.post {
+                resumeSessionId = sessionId
+                notifyUi()
+            }
+        }
+
         override fun onResponseCompleted() {
             mainHandler.post {
                 audio?.awaitDrainThenStop()
@@ -306,6 +313,21 @@ class WakeWordService : Service() {
         updateNotification()
         notifyUi()
         s.connect(resumeId)
+    }
+
+    /** Switch de conversation pendant une session live : rebind à chaud + reset UI. */
+    fun switchConversation(sessionId: String?) {
+        val s = session ?: return
+        if (!s.isReady) return
+        s.sendConversationSet(sessionId)
+        resumeSessionId = sessionId
+        // Reset l'état "réfléchit/parle" : le tour en cours appartient à l'ancienne conversation.
+        if (currentState == UiState.THINKING || currentState == UiState.SPEAKING || currentState == UiState.TRANSCRIBING) {
+            currentState = UiState.LISTENING
+            setStatus(getString(R.string.status_ready, s.modelName ?: ""))
+        }
+        liveTranscript = ""
+        notifyUi()
     }
 
     fun disconnect() {

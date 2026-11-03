@@ -306,6 +306,10 @@ class MainActivity : Activity() {
             // une session live est en cours (le transcript appartient à la session).
             showingHistory = false
             val s = service
+            if (s != null && s.sessionActive) {
+                s.switchConversation(null) // rebind unbound côté gateway
+                return
+            }
             if (s == null || !s.sessionActive) {
                 transcriptView.setText(R.string.transcript_empty)
                 lastRenderedLines = s?.transcriptLines?.size ?: 0
@@ -313,6 +317,13 @@ class MainActivity : Activity() {
             return
         }
         val conv = conversations.getOrNull(position - 1) ?: return
+        // Session live active : on rebind la conversation côté gateway (conversation.set),
+        // pas seulement l'affichage historique.
+        val s = service
+        if (s != null && s.sessionActive) {
+            s.switchConversation(conv.id)
+            return
+        }
         loadHistory(conv)
     }
 

@@ -30,6 +30,7 @@ class LiveSession(
         fun onClosed(code: Int, reason: String)
         fun onConnectionFailed(reason: String)
         fun onTaskSnapshot(tasks: List<TaskSnapshot>) {}
+        fun onConversationUpdated(sessionId: String?) {}
     }
 
     data class TaskSnapshot(
@@ -51,6 +52,10 @@ class LiveSession(
     @Volatile private var ready = false
 
     val isReady: Boolean get() = ready
+    @Volatile var conversationId: String? = null
+        private set
+    @Volatile var modelName: String? = null
+        private set
 
     fun connect(conversationSessionId: String?) {
         userClosed = false
@@ -107,6 +112,12 @@ class LiveSession(
                     sampleRate,
                     msg.optJSONObject("conversation")?.optString("sessionId")?.takeIf { it.isNotEmpty() },
                 )
+                conversationId = msg.optJSONObject("conversation")?.optString("sessionId")?.takeIf { it.isNotEmpty() }
+                modelName = msg.optString("model").takeIf { it.isNotEmpty() }
+            }
+            "conversation.updated" -> {
+                conversationId = msg.optJSONObject("conversation")?.optString("sessionId")?.takeIf { it.isNotEmpty() }
+                listener.onConversationUpdated(conversationId)
             }
             "session.error" -> listener.onSessionError(msg.optString("message"), msg.optBoolean("recoverable", false))
             "transcript.delta" -> listener.onTranscript(
@@ -186,6 +197,21 @@ class LiveSession(
     }
 
     /** Barge-in : demande à la gateway d'annuler la réponse en cours (TTS compris). */
+    /** Rebind la session live sur une autre conversation (null = unbound/nouvelle). */
+    fun sendConversationSet(sessionId: String?) {
+        val id = "conv-${requestIds.incrementAndGet()}"
+        val conv = if (sessionId != null) {
+            JSONObject().put("mode", "resume").put("sessionId", sessionId)
+        } else {
+            JSONObject().put("mode", "unbound")
+        }
+        socket?.send(JSONObject().apply {
+            put("type", "conversation.set")
+            put("id", id)
+            put("conversation", conv)
+        }.toString())
+    }
+
     fun sendTaskList(limit: Int = 25) {
         val id = "tasks-${requestIds.incrementAndGet()}"
         socket?.send(JSONObject().apply {
