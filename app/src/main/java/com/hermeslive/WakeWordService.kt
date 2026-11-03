@@ -233,7 +233,10 @@ class WakeWordService : Service() {
             // Half-duplex par défaut (évite l'écho haut-parleur) ; le barge-in
             // (réglage) garde le micro actif pendant la réponse : le serveur
             // détecte la parole, émet input.speech_started et coupe le TTS.
-            val muted = audio?.playbackActive == true && !bargeIn()
+            // Pas d'envoi audio pendant que Hermes réfléchit (évite la backpressure
+            // serveur) ni pendant la lecture sans barge-in.
+            val muted = currentState == UiState.THINKING ||
+                (audio?.playbackActive == true && !bargeIn())
             if (!muted) session?.sendAudioFrame(frame)
         }
         // Raccroché vocal : les trames brutes de la session alimentent aussi
