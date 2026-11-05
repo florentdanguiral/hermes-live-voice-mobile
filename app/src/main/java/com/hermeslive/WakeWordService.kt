@@ -331,6 +331,9 @@ class WakeWordService : Service() {
     fun switchConversation(sessionId: String?) {
         val s = session ?: return
         if (!s.isReady) return
+        // Déjà sur cette conversation : rien à faire (l'auto-sélection du
+        // spinner ne doit pas détacher le tour en vol de la conversation courante).
+        if (sessionId == s.conversationId) return
         // Le tour de l'ancienne conversation N'EST PAS annulé : il continue côté
         // serveur et le gateway le convertira en notification (fait / reste à
         // faire). On sauve juste son état pour ce quitter.
@@ -346,6 +349,9 @@ class WakeWordService : Service() {
         liveTranscript = ""
         notifyUi()
     }
+
+    /** Id de la conversation actuellement liée à la session live (null = unbound). */
+    fun activeConversationId(): String? = session?.conversationId
 
     fun disconnect() {
         mainHandler.removeCallbacks(taskPoller)

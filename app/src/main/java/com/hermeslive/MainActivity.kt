@@ -46,6 +46,7 @@ class MainActivity : Activity() {
 
     private var service: WakeWordService? = null
     private var conversations: List<Conversation> = emptyList()
+    private var pendingAutoSelectId: String? = null
     private var lastRenderedLines = 0
     private var showingHistory = false
     private var assistConnectPending = false
@@ -217,6 +218,23 @@ class MainActivity : Activity() {
         }
         statusView.text = s.statusText.ifEmpty { getString(R.string.status_disconnected) }
 
+        // Auto-synchro du spinner : la conversation liée à la session live doit
+        // apparaître sélectionnée. Sinon « Nouvelle conversation » reste actif et
+        // re-cliquer dessus (même position) ne déclenche pas l'événement de switch.
+        if (s.sessionActive) {
+            val cur = s.activeConversationId()
+            if (cur != null && spinner.selectedItemPosition == 0) {
+                val idx = conversations.indexOfFirst { it.id == cur }
+                if (idx >= 0) {
+                    pendingAutoSelectId = null
+                    spinner.setSelection(idx + 1) // switchConversation(same id) = no-op côté service
+                } else if (pendingAutoSelectId != cur) {
+                    pendingAutoSelectId = cur
+                    loadConversations(selectId = cur)
+                }
+            }
+        }
+
         // Couleur du statut selon l'état
         val statusColor = when (s.currentState) {
             WakeWordService.UiState.LISTENING -> 0xFF2E7D32.toInt()    // vert
@@ -280,7 +298,7 @@ class MainActivity : Activity() {
 
     // ----- Conversations -----
 
-    private fun loadConversations() {
+    private fun loadConversations(selectId: String? = null) {
         Thread {
             val url = prefs().getString("url", "") ?: ""
             val token = prefs().getString("token", "") ?: ""
@@ -295,6 +313,11 @@ class MainActivity : Activity() {
                 val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, labels)
                 adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
                 spinner.adapter = adapter
+                // Sélection auto demandée (conversation active de la session live)
+                if (selectId != null) {
+                    val idx = list.indexOfFirst { it.id == selectId }
+                    if (idx >= 0) spinner.setSelection(idx + 1)
+                }
             }
         }.start()
     }
