@@ -327,6 +327,12 @@ class WakeWordService : Service() {
     fun switchConversation(sessionId: String?) {
         val s = session ?: return
         if (!s.isReady) return
+        // Isolement : on annule d'abord le tour en vol de l'ancienne conversation
+        // (Hermes arrête de répondre, plus d'événements 'réfléchit/transcription'
+        // qui trickle après le switch), puis on rebind.
+        if (currentState == UiState.THINKING || currentState == UiState.SPEAKING || currentState == UiState.TRANSCRIBING) {
+            s.sendCancel()
+        }
         s.sendConversationSet(sessionId)
         resumeSessionId = sessionId
         // Reset l'état "réfléchit/parle" : le tour en cours appartient à l'ancienne conversation.
@@ -335,6 +341,8 @@ class WakeWordService : Service() {
             setStatus(getString(R.string.status_ready, s.modelName ?: ""))
         }
         liveTranscript = ""
+        pendingText?.setLength(0)
+        pendingSpeaker = null
         notifyUi()
     }
 
