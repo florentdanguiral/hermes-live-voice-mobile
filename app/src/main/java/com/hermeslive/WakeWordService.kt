@@ -245,9 +245,14 @@ class WakeWordService : Service() {
             mainHandler.post { disconnect() }
         }
         audio?.rawSink = { chunk, len ->
-            // Pas pendant la lecture (écho haut-parleur) : après un barge-in la
-            // lecture s'arrête et la phrase de fin est entendue clairement.
-            if (audio?.playbackActive != true) hangup?.feed(chunk, len)
+            // Pas pendant la lecture (écho haut-parleur) ni pendant que Hermes
+            // réfléchit / transcrit : Vosk peut confondre un fragment de phrase
+            // avec « raccroche » et couper la session en pleine réponse.
+            // On écoute le raccroché en écoute calme (LISTENING) ou après un
+            // barge-in (SPEAKING avec lecture stoppée).
+            val canHangup = currentState == UiState.LISTENING ||
+                (currentState == UiState.SPEAKING && audio?.playbackActive != true)
+            if (audio?.playbackActive != true && canHangup) hangup?.feed(chunk, len)
         }
     }
 
