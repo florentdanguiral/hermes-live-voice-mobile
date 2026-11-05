@@ -197,6 +197,7 @@ class WakeWordService : Service() {
             mainHandler.post {
                 audio?.awaitDrainThenStop()
                 currentState = UiState.LISTENING
+                convStates[session?.conversationId] = UiState.LISTENING
                 setStatus(getString(R.string.status_listening))
                 notifyUi()
             }
@@ -324,25 +325,25 @@ class WakeWordService : Service() {
     }
 
     /** Switch de conversation pendant une session live : rebind à chaud + reset UI. */
+    /** État par conversation : « réfléchit » ne s'affiche que pour la conversation courante. */
+    private val convStates = mutableMapOf<String?, UiState>()
+
     fun switchConversation(sessionId: String?) {
         val s = session ?: return
         if (!s.isReady) return
-        // Isolement : on annule d'abord le tour en vol de l'ancienne conversation
-        // (Hermes arrête de répondre, plus d'événements 'réfléchit/transcription'
-        // qui trickle après le switch), puis on rebind.
-        if (currentState == UiState.THINKING || currentState == UiState.SPEAKING || currentState == UiState.TRANSCRIBING) {
-            s.sendCancel()
-        }
+        // Le tour de l'ancienne conversation N'EST PAS annulé : il continue côté
+        // serveur et le gateway le convertira en notification (fait / reste à
+        // faire). On sauve juste son état pour ce quitter.
+        convStates[s.conversationId] = currentState
         s.sendConversationSet(sessionId)
         resumeSessionId = sessionId
-        // Reset l'état "réfléchit/parle" : le tour en cours appartient à l'ancienne conversation.
-        if (currentState == UiState.THINKING || currentState == UiState.SPEAKING || currentState == UiState.TRANSCRIBING) {
-            currentState = UiState.LISTENING
-            setStatus(getString(R.string.status_ready, s.modelName ?: ""))
-        }
+        // Restaure l'état de la conversation ciblée (défaut : écoute).
+        currentState = convStates[sessionId] ?: UiState.LISTENING
+        setStatus(
+            if (currentState == UiState.THINKING) getString(R.string.status_thinking)
+            else getString(R.string.status_ready, s.modelName ?: "")
+        )
         liveTranscript = ""
-        pendingText?.setLength(0)
-        pendingSpeaker = null
         notifyUi()
     }
 
