@@ -47,6 +47,11 @@ class MainActivity : Activity() {
     private var service: WakeWordService? = null
     private var conversations: List<Conversation> = emptyList()
     private var pendingAutoSelectId: String? = null
+
+    /** L'utilisateur vient de choisir une conversation : on laisse son choix
+     * * tranquille quelques secondes (l'auto-synchro ne doit pas le ramener
+     * sur l'ancienne conversation pendant que la nouvelle se lie). */
+    private var autoSelectSuppressedUntil = 0L
     private var lastRenderedLines = 0
     private var showingHistory = false
     private var assistConnectPending = false
@@ -221,7 +226,7 @@ class MainActivity : Activity() {
         // Auto-synchro du spinner : la conversation liée à la session live doit
         // apparaître sélectionnée. Sinon « Nouvelle conversation » reste actif et
         // re-cliquer dessus (même position) ne déclenche pas l'événement de switch.
-        if (s.sessionActive) {
+        if (s.sessionActive && System.currentTimeMillis() >= autoSelectSuppressedUntil) {
             val cur = s.activeConversationId()
             if (cur != null && spinner.selectedItemPosition == 0) {
                 val idx = conversations.indexOfFirst { it.id == cur }
@@ -330,6 +335,7 @@ class MainActivity : Activity() {
             showingHistory = false
             val s = service
             if (s != null && s.sessionActive) {
+                autoSelectSuppressedUntil = System.currentTimeMillis() + 4_000
                 s.switchToNewConversation() // crée une nouvelle conversation côté gateway
                 return
             }
