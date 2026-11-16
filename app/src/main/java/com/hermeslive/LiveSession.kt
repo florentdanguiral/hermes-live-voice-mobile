@@ -212,6 +212,16 @@ class LiveSession(
         }.toString())
     }
 
+    /** Crée une NOUVELLE conversation et la lie à la session live. */
+    fun sendConversationNew() {
+        val id = "conv-${requestIds.incrementAndGet()}"
+        socket?.send(JSONObject().apply {
+            put("type", "conversation.set")
+            put("id", id)
+            put("conversation", JSONObject().put("mode", "new"))
+        }.toString())
+    }
+
     fun sendTaskList(limit: Int = 25) {
         val id = "tasks-${requestIds.incrementAndGet()}"
         socket?.send(JSONObject().apply {

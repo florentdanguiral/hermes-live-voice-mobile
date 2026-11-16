@@ -334,12 +334,27 @@ class WakeWordService : Service() {
         // Déjà sur cette conversation : rien à faire (l'auto-sélection du
         // spinner ne doit pas détacher le tour en vol de la conversation courante).
         if (sessionId == s.conversationId) return
-        // Le tour de l'ancienne conversation N'EST PAS annulé : il continue côté
-        // serveur et le gateway le convertira en notification (fait / reste à
-        // faire). On sauve juste son état pour ce quitter.
         convStates[s.conversationId] = currentState
         s.sendConversationSet(sessionId)
         resumeSessionId = sessionId
+        restoreStateFor(s, sessionId)
+    }
+
+    /** « Nouvelle conversation » pendant une session live : on CRÉE une nouvelle
+     * conversation (pas unbound — sinon toute parole tombe sur
+     * « No persisted Hermes conversation selected »). */
+    fun switchToNewConversation() {
+        val s = session ?: return
+        if (!s.isReady) return
+        convStates[s.conversationId] = currentState
+        s.sendConversationNew()
+        liveTranscript = ""
+        currentState = UiState.LISTENING
+        setStatus(getString(R.string.status_listening))
+        notifyUi()
+    }
+
+    private fun restoreStateFor(s: LiveSession, sessionId: String?) {
         // Restaure l'état de la conversation ciblée (défaut : écoute).
         currentState = convStates[sessionId] ?: UiState.LISTENING
         setStatus(

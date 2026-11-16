@@ -330,7 +330,7 @@ class MainActivity : Activity() {
             showingHistory = false
             val s = service
             if (s != null && s.sessionActive) {
-                s.switchConversation(null) // rebind unbound côté gateway
+                s.switchToNewConversation() // crée une nouvelle conversation côté gateway
                 return
             }
             if (s == null || !s.sessionActive) {
