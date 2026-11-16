@@ -69,7 +69,7 @@ class WakeWordService : Service() {
                     .thenByDescending { it.updatedAt }
             )
         for (task in fresh.take(3)) {
-            session?.sendTaskNotificationAck(task.taskId)
+            session?.sendTaskNotificationAck(task.taskId, task.notificationId)
             notifyTaskDone(task)
         }
     }

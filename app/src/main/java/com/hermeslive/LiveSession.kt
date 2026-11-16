@@ -39,6 +39,7 @@ class LiveSession(
         val state: String,
         val priority: String,
         val updatedAt: Double,
+        val notificationId: String? = null,
     )
 
     private val client: OkHttpClient = OkHttpClient.Builder()
@@ -146,6 +147,7 @@ class LiveSession(
                         state = t.optString("state"),
                         priority = t.optString("priority", "normal"),
                         updatedAt = t.optDouble("updatedAt", 0.0),
+                        notificationId = t.optJSONObject("notification")?.optString("notificationId")?.takeIf { it.isNotEmpty() },
                     )
                 }
                 listener.onTaskSnapshot(tasks)
@@ -160,6 +162,8 @@ class LiveSession(
                             state = t.optString("state", "completed"),
                             priority = t.optString("priority", "normal"),
                             updatedAt = t.optDouble("updatedAt", 0.0),
+                            notificationId = msg.optJSONObject("notification")
+                                ?.optString("notificationId")?.takeIf { it.isNotEmpty() },
                         )
                     )
                 )
@@ -231,12 +235,13 @@ class LiveSession(
         }.toString())
     }
 
-    fun sendTaskNotificationAck(taskId: String) {
+    fun sendTaskNotificationAck(taskId: String, notificationId: String?) {
         val id = "ack-${requestIds.incrementAndGet()}"
         socket?.send(JSONObject().apply {
             put("type", "task.notification.ack")
             put("id", id)
             put("taskId", taskId)
+            if (notificationId != null) put("notificationId", notificationId)
         }.toString())
     }
 
