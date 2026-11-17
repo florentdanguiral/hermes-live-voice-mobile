@@ -338,6 +338,7 @@ class WakeWordService : Service() {
         s.sendConversationSet(sessionId)
         resumeSessionId = sessionId
         restoreStateFor(s, sessionId)
+        resetTranscriptBuffer()
     }
 
     /** « Nouvelle conversation » pendant une session live : on CRÉE une nouvelle
@@ -351,6 +352,17 @@ class WakeWordService : Service() {
         liveTranscript = ""
         currentState = UiState.LISTENING
         setStatus(getString(R.string.status_listening))
+        resetTranscriptBuffer()
+        notifyUi()
+    }
+
+    /** Isolement des transcripts par conversation : au switch, le tampon live
+     * ne doit PAS traîner les lignes de l'ancienne conversation (elles sont
+     * déjà dans l'historique persisté de leur conversation Hermes). */
+    private fun resetTranscriptBuffer() {
+        pendingSpeaker = null
+        pendingText = StringBuilder()
+        transcriptLines.clear()
         notifyUi()
     }
 

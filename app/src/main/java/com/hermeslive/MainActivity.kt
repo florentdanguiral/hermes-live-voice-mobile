@@ -351,6 +351,11 @@ class MainActivity : Activity() {
         val s = service
         if (s != null && s.sessionActive) {
             s.switchConversation(conv.id)
+            // Isolement par conversation : on affiche l'historique persisté de la
+            // conversation sélectionnée — le tampon live a été vidé par le switch.
+            showingHistory = true
+            transcriptView.setText(R.string.transcript_empty)
+            loadHistory(conv)
             return
         }
         loadHistory(conv)
